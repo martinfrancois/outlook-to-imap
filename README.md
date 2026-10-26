@@ -106,7 +106,7 @@ accounts:
 | `microsoft.tenant` | `consumers` | Who may sign in: `consumers` for personal accounts. See [Work and school accounts](#work-and-school-accounts). |
 | `pollInterval` | `PT1H` | Time between the end of one poll and the start of the next, as an ISO-8601 duration from `PT1M` to `P30D`. |
 | `stateDirectory` | `data` next to the config file; `/data` in the image | Holds the login files and, by default, the SQLite database. |
-| `database.url` | `jdbc:sqlite:<stateDirectory>/outlook-to-imap.db` | `jdbc:sqlite:...` or `jdbc:postgresql://host/db`. See [Data and backups](#data-and-backups). |
+| `database.url` | `jdbc:sqlite:<stateDirectory>/outlook-to-imap.db` | `jdbc:sqlite:...` or `jdbc:postgresql://host/db`. PostgreSQL needs TLS with a verified certificate unless the URL sets `sslmode` or `ssl`. See [Data and backups](#data-and-backups). |
 | `database.username` | none | PostgreSQL user. |
 | `database.passwordFile` | none | File holding the PostgreSQL password. |
 | `monitoring.healthPort` | `8080` | Port of `GET /health` while `run` is active. `0` turns it off. |
@@ -472,6 +472,27 @@ database:
   username: outlook_to_imap
   passwordFile: secrets/postgres-password
 ```
+
+The connection to PostgreSQL uses TLS and checks the server's certificate and host name
+(`sslmode=verify-full`). The PostgreSQL driver does not use Java's trust store for that. It reads
+the CA certificate that signed the server's certificate from `~/.postgresql/root.crt`, which is
+`/data/.postgresql/root.crt` in the image, or from the file named by `sslrootcert`:
+
+```yaml
+database:
+  url: jdbc:postgresql://db.internal:5432/outlook_to_imap?sslrootcert=/config/secrets/postgres-ca.crt
+```
+
+For a server certificate from a public CA, add `sslfactory=org.postgresql.ssl.DefaultJavaSSLFactory`
+to the URL instead, and Java's trust store decides. An `sslmode` or `ssl` in the URL replaces the
+default: `sslmode=require` encrypts without checking the certificate, and `sslmode=disable` or
+`ssl=false` turns TLS off. Use those only where nobody else can reach the network between the
+service and the database.
+
+Version 1.0.0 did not check the certificate and fell back to plain text when the server offered no
+TLS. Later versions refuse a server without TLS at start with "The server does not support SSL".
+Turn TLS on in the server, or add `sslmode=disable` to the URL to connect as 1.0.0 did. A URL that
+already has `ssl=false` connects as before.
 
 The schema is created on first start. SQLite and PostgreSQL are the two supported engines; CI tests
 both. The token files are small and rewritten whole by rename, which is safe on NFS.

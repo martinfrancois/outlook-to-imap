@@ -1,6 +1,7 @@
 package ch.fmartin.outlooktoimap.store;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import ch.fmartin.outlooktoimap.Databases;
@@ -101,6 +102,25 @@ class StoreTest {
         try (Store store = Store.open(new Database(Database.SQLITE_PREFIX + file, null, null))) {
             assertThat(Files.getPosixFilePermissions(file.getParent())).isEqualTo(PosixFilePermissions.fromString("rwx------"));
             assertThat(Files.getPosixFilePermissions(file)).isEqualTo(PosixFilePermissions.fromString("rw-------"));
+        }
+    }
+
+    @Test
+    void postgresqlNeedsAVerifiedTlsConnectionUnlessTheUrlSaysOtherwise() {
+        Database withoutTls = Databases.fresh(Engine.POSTGRESQL, directory);
+        Database urlWithoutSslmode = new Database(withoutTls.url().replaceFirst("[?&]" + Databases.TLS_OFF, ""),
+                withoutTls.username(), withoutTls.passwordFile());
+
+        // pgjdbc reads sslmode before ssl, so a default sslmode must not override ssl=false.
+        Database urlWithSslFalse = new Database(withoutTls.url().replace(Databases.TLS_OFF, "ssl=false"),
+                withoutTls.username(), withoutTls.passwordFile());
+
+        assertThatThrownBy(() -> Store.open(urlWithoutSslmode)).hasStackTraceContaining("does not support SSL");
+        try (Store store = Store.open(withoutTls)) {
+            assertThat(store.statuses()).isEmpty();
+        }
+        try (Store store = Store.open(urlWithSslFalse)) {
+            assertThat(store.statuses()).isEmpty();
         }
     }
 
