@@ -6,6 +6,15 @@ services:
     restart: unless-stopped
     # The service finishes the message it is on when stopped; give it the time to.
     stop_grace_period: 30s
+    # The service writes only to /data and /tmp. The SQLite driver loads its native library from
+    # /tmp, so /tmp needs exec.
+    read_only: true
+    tmpfs:
+      - /tmp:exec
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./config.yaml:/config/config.yaml:ro
       - ./secrets:/config/secrets:ro
