@@ -1,6 +1,6 @@
 package ch.fmartin.outlooktoimap.service;
 
-import ch.fmartin.outlooktoimap.sync.RunReport;
+import ch.fmartin.outlooktoimap.poll.PollReport;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -26,7 +26,7 @@ public final class Heartbeat {
         this.url = url;
     }
 
-    public void report(RunReport report) {
+    public void report(PollReport report) {
         if (url == null) {
             return;
         }

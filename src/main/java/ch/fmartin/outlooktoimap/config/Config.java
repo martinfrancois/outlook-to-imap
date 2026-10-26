@@ -30,7 +30,14 @@ public record Config(
         public static final String DEFAULT_TENANT = "consumers";
     }
 
-    public record Database(String url, String username, Path passwordFile) {}
+    public record Database(String url, String username, Path passwordFile) {
+        public static final String SQLITE_PREFIX = "jdbc:sqlite:";
+        public static final String POSTGRESQL_PREFIX = "jdbc:postgresql:";
+
+        public boolean isSqlite() {
+            return url.startsWith(SQLITE_PREFIX);
+        }
+    }
 
     public record Monitoring(int healthPort, String heartbeatUrl) {
         public static final int DEFAULT_HEALTH_PORT = 8080;

@@ -2,6 +2,7 @@ package ch.fmartin.outlooktoimap.imap;
 
 import ch.fmartin.outlooktoimap.config.Config.Destination;
 import ch.fmartin.outlooktoimap.config.Config.Security;
+import ch.fmartin.outlooktoimap.config.SecretFile;
 import jakarta.mail.Folder;
 import jakarta.mail.FolderClosedException;
 import jakarta.mail.Message;
@@ -10,18 +11,11 @@ import jakarta.mail.Session;
 import jakarta.mail.StoreClosedException;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.search.HeaderTerm;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Properties;
@@ -30,7 +24,6 @@ import org.eclipse.angus.mail.imap.AppendUID;
 import org.eclipse.angus.mail.imap.IMAPFolder;
 import org.eclipse.angus.mail.imap.IMAPStore;
 import org.eclipse.angus.mail.imap.protocol.BODY;
-import org.eclipse.angus.mail.util.CRLFOutputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,7 +32,7 @@ import org.slf4j.LoggerFactory;
  * with APPEND and finds them again by content, which is how an upload whose reply never arrived
  * gets settled without uploading the message twice.
  */
-public final class ImapDestination implements DestinationMailbox {
+public final class ImapDestination implements DestinationConnection {
 
     private static final Logger LOG = LoggerFactory.getLogger(ImapDestination.class);
     private static final String TIMEOUT_MILLIS = "120000";
@@ -74,42 +67,14 @@ public final class ImapDestination implements DestinationMailbox {
         Session session = Session.getInstance(properties);
         try {
             IMAPStore store = (IMAPStore) session.getStore("imap");
-            store.connect(destination.host(), destination.port(), destination.username(), password(destination));
+            store.connect(destination.host(), destination.port(), destination.username(),
+                    SecretFile.read(destination.passwordFile()));
             return new ImapDestination(destination, store);
-        } catch (MessagingException e) {
+        } catch (MessagingException | UncheckedIOException e) {
             throw new DestinationUnavailableException(destination.name(), e);
         }
     }
 
-    private static String password(Destination destination) {
-        try {
-            return Files.readString(destination.passwordFile(), StandardCharsets.UTF_8).strip();
-        } catch (IOException e) {
-            throw new UncheckedIOException("cannot read the password file of destination " + destination.name(), e);
-        }
-    }
-
-    /**
-     * The bytes the server will store for {@code mime}. IMAP requires CRLF line endings and Angus
-     * Mail converts any others on the way out, so hashes are taken over the converted form.
-     */
-    public static byte[] canonical(byte[] mime) {
-        ByteArrayOutputStream out = new ByteArrayOutputStream(mime.length + 64);
-        try (OutputStream crlf = new CRLFOutputStream(out)) {
-            crlf.write(mime);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return out.toByteArray();
-    }
-
-    public static String sha256(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
-    }
 
     @Override
     public OptionalLong append(String folderPath, byte[] mime, Date received) {
@@ -124,17 +89,11 @@ public final class ImapDestination implements DestinationMailbox {
         return run(folderPath, folder -> folder.getMessageByUID(uid) != null);
     }
 
-    /**
-     * The search narrows candidates by Message-ID, or by Date when there is none, and the SHA-256
-     * of each candidate's full content decides.
-     */
     @Override
-    public OptionalLong find(String folderPath, byte[] mime) {
-        String sha = sha256(mime);
+    public OptionalLong find(String folderPath, Fingerprint fingerprint) {
         return run(folderPath, folder -> {
-            Message[] candidates = candidates(folder, mime);
-            for (Message candidate : candidates) {
-                if (candidate.getSize() != mime.length) {
+            for (Message candidate : candidates(folder, fingerprint)) {
+                if (candidate.getSize() != fingerprint.size()) {
                     continue;
                 }
                 int number = candidate.getMessageNumber();
@@ -142,7 +101,7 @@ public final class ImapDestination implements DestinationMailbox {
                     BODY body = protocol.peekBody(number, "");
                     return body == null ? null : body.getByteArrayInputStream().readAllBytes();
                 });
-                if (stored != null && sha.equals(sha256(stored))) {
+                if (stored != null && fingerprint.contentHash().equals(Fingerprint.hash(stored))) {
                     return OptionalLong.of(folder.getUID(candidate));
                 }
             }
@@ -150,13 +109,13 @@ public final class ImapDestination implements DestinationMailbox {
         });
     }
 
-    private static Message[] candidates(IMAPFolder folder, byte[] mime) throws MessagingException {
-        MimeMessage parsed = new MimeMessage(Session.getInstance(new Properties()), new ByteArrayInputStream(mime));
-        for (String header : new String[] {"Message-ID", "Date"}) {
-            String value = parsed.getHeader(header, null);
-            if (value != null && !value.isBlank()) {
-                return folder.search(new HeaderTerm(header, value.strip()));
-            }
+    /** Narrows by Message-ID, or by Date for a message without one, or else takes the whole folder. */
+    private static Message[] candidates(IMAPFolder folder, Fingerprint fingerprint) throws MessagingException {
+        if (fingerprint.messageId() != null) {
+            return folder.search(new HeaderTerm("Message-ID", fingerprint.messageId()));
+        }
+        if (fingerprint.date() != null) {
+            return folder.search(new HeaderTerm("Date", fingerprint.date()));
         }
         return folder.getMessages();
     }

@@ -94,13 +94,13 @@ public final class ConfigLoader {
         }
 
         private Database database(RawDatabase raw, Path stateDirectory) {
-            String defaultUrl = "jdbc:sqlite:" + stateDirectory.resolve("outlook-to-imap.db");
+            String defaultUrl = Database.SQLITE_PREFIX + stateDirectory.resolve("outlook-to-imap.db");
             if (raw == null) {
                 return new Database(defaultUrl, null, null);
             }
             String url = raw.url() == null ? defaultUrl : raw.url();
-            if (!url.startsWith("jdbc:sqlite:") && !url.startsWith("jdbc:postgresql:")) {
-                errors.add("database.url must start with jdbc:sqlite: or jdbc:postgresql:, got " + url);
+            if (!url.startsWith(Database.SQLITE_PREFIX) && !url.startsWith(Database.POSTGRESQL_PREFIX)) {
+                errors.add("database.url must start with " + Database.SQLITE_PREFIX + " or " + Database.POSTGRESQL_PREFIX + ", got " + url);
             }
             Path passwordFile = raw.passwordFile() == null ? null : readableFile("database.passwordFile", raw.passwordFile());
             return new Database(url, blankToNull(raw.username()), passwordFile);

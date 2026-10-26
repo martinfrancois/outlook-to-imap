@@ -1,23 +1,25 @@
-package ch.fmartin.outlooktoimap.sync;
+package ch.fmartin.outlooktoimap.poll;
 
 import ch.fmartin.outlooktoimap.config.Config;
 import ch.fmartin.outlooktoimap.config.Config.Account;
 import ch.fmartin.outlooktoimap.config.Config.Destination;
 import ch.fmartin.outlooktoimap.config.Config.FolderMapping;
-import ch.fmartin.outlooktoimap.imap.DestinationMailbox;
+import ch.fmartin.outlooktoimap.imap.DestinationConnection;
+import ch.fmartin.outlooktoimap.imap.Fingerprint;
 import ch.fmartin.outlooktoimap.imap.ImapDestination;
 import ch.fmartin.outlooktoimap.imap.ImapDestination.DestinationException;
 import ch.fmartin.outlooktoimap.imap.ImapDestination.DestinationUnavailableException;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.Changes;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.DeltaExpiredException;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.GraphException;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.MessageGoneException;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.SourceMessage;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.ThrottledException;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.Changes;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.DeltaExpiredException;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.GraphException;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.MessageGoneException;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.SourceMessage;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.ThrottledException;
 import ch.fmartin.outlooktoimap.microsoft.AccessTokens;
 import ch.fmartin.outlooktoimap.microsoft.ReauthorizationRequiredException;
 import ch.fmartin.outlooktoimap.store.Store;
+import ch.fmartin.outlooktoimap.store.Counts;
 import ch.fmartin.outlooktoimap.store.Store.AccountStatus;
 import ch.fmartin.outlooktoimap.store.Store.Receipt;
 import ch.fmartin.outlooktoimap.store.Store.State;
@@ -42,28 +44,28 @@ import org.slf4j.LoggerFactory;
  * one means at most remove the source. A failure stays with its message, folder or account and
  * never stops the others.
  */
-public final class Synchronizer {
+public final class Poller {
 
-    private static final Logger LOG = LoggerFactory.getLogger(Synchronizer.class);
+    private static final Logger LOG = LoggerFactory.getLogger(Poller.class);
 
     private final Config config;
     private final Store store;
-    private final AccessTokens login;
-    private final Function<Account, GraphMailbox> mailboxes;
-    private final Function<Destination, DestinationMailbox> destinations;
+    private final AccessTokens tokens;
+    private final Function<Account, GraphSource> sources;
+    private final Function<Destination, DestinationConnection> destinations;
     private final Clock clock;
 
-    public Synchronizer(Config config, Store store, AccessTokens login) {
-        this(config, store, login, account -> new GraphMailbox(() -> login.accessToken(account)),
+    public Poller(Config config, Store store, AccessTokens tokens) {
+        this(config, store, tokens, account -> new GraphSource(() -> tokens.accessToken(account)),
                 ImapDestination::connect, Clock.systemUTC());
     }
 
-    public Synchronizer(Config config, Store store, AccessTokens login, Function<Account, GraphMailbox> mailboxes,
-            Function<Destination, DestinationMailbox> destinations, Clock clock) {
+    public Poller(Config config, Store store, AccessTokens tokens, Function<Account, GraphSource> sources,
+            Function<Destination, DestinationConnection> destinations, Clock clock) {
         this.config = config;
         this.store = store;
-        this.login = login;
-        this.mailboxes = mailboxes;
+        this.tokens = tokens;
+        this.sources = sources;
         this.destinations = destinations;
         this.clock = clock;
     }
@@ -76,55 +78,47 @@ public final class Synchronizer {
      * @param stop checked between messages, so a shutdown ends the poll at a message boundary
      * @param progress called after every message, used to keep the poll lease alive
      */
-    public RunReport poll(boolean dryRun, Consumer<String> plan, BooleanSupplier stop, Runnable progress) {
+    public PollReport poll(boolean dryRun, Consumer<String> plan, BooleanSupplier stop, Runnable progress) {
         List<AccountResult> results = new ArrayList<>();
         try (Connections connections = new Connections()) {
             for (Account account : config.accounts()) {
                 if (stop.getAsBoolean()) {
                     break;
                 }
-                AccountRun run = new AccountRun(account, connections, dryRun, plan, stop, progress);
-                AccountResult result = run.execute();
+                AccountResult result = new AccountPoll(account, connections, dryRun, plan, stop, progress).execute();
                 results.add(result);
                 if (!dryRun) {
                     store.saveStatus(new AccountStatus(account.name(), result.startedAt(),
-                            result.succeeded() ? clock.instant() : null, result.imported(), result.removed(),
-                            result.skipped(), result.failed(), result.error()));
+                            result.succeeded() ? clock.instant() : null, result.counts(), result.error()));
                 }
             }
         }
-        return new RunReport(results);
+        return new PollReport(results);
     }
 
     /** The destination connections of one poll, opened on first use and closed at the end. */
     private final class Connections implements AutoCloseable {
-        private final Map<String, DestinationMailbox> open = new HashMap<>();
+        private final Map<String, DestinationConnection> open = new HashMap<>();
 
-        DestinationMailbox get(String name) {
-            return open.computeIfAbsent(name, n -> {
-                Destination destination = config.destinations().get(n);
-                if (destination == null) {
-                    throw new DestinationException("destination " + n + " is no longer configured", null);
-                }
-                return destinations.apply(destination);
-            });
+        DestinationConnection get(String name) {
+            return open.computeIfAbsent(name, n -> destinations.apply(config.destinations().get(n)));
         }
 
         void drop(String name) {
-            DestinationMailbox mailbox = open.remove(name);
-            if (mailbox != null) {
-                mailbox.close();
+            DestinationConnection connection = open.remove(name);
+            if (connection != null) {
+                connection.close();
             }
         }
 
         @Override
         public void close() {
-            open.values().forEach(DestinationMailbox::close);
+            open.values().forEach(DestinationConnection::close);
             open.clear();
         }
     }
 
-    private final class AccountRun {
+    private final class AccountPoll {
         private final Account account;
         private final Connections connections;
         private final boolean dryRun;
@@ -138,7 +132,7 @@ public final class Synchronizer {
         private int failed;
         private final List<String> errors = new ArrayList<>();
 
-        AccountRun(Account account, Connections connections, boolean dryRun, Consumer<String> plan,
+        AccountPoll(Account account, Connections connections, boolean dryRun, Consumer<String> plan,
                 BooleanSupplier stop, Runnable progress) {
             this.account = account;
             this.connections = connections;
@@ -151,14 +145,14 @@ public final class Synchronizer {
         AccountResult execute() {
             try {
                 // Fails fast with a clear message when the login is gone, before any folder work.
-                login.accessToken(account);
-                GraphMailbox mailbox = mailboxes.apply(account);
+                tokens.accessToken(account);
+                GraphSource source = sources.apply(account);
                 for (FolderMapping mapping : account.folders()) {
                     if (stop.getAsBoolean()) {
                         break;
                     }
                     try {
-                        copyFolder(mailbox, mapping);
+                        copyFolder(source, mapping);
                     } catch (DestinationUnavailableException e) {
                         connections.drop(mapping.destination());
                         fail(mapping.source() + ": " + e.getMessage(), e);
@@ -175,7 +169,7 @@ public final class Synchronizer {
             } catch (RuntimeException e) {
                 fail("unexpected failure: " + e, e);
             }
-            return new AccountResult(account.name(), startedAt, imported, removed, skipped, failed,
+            return new AccountResult(account.name(), startedAt, new Counts(imported, removed, skipped, failed),
                     errors.isEmpty() ? null : String.join("; ", errors));
         }
 
@@ -185,8 +179,8 @@ public final class Synchronizer {
             LOG.warn("account {}: {}", account.name(), message, cause);
         }
 
-        private void copyFolder(GraphMailbox mailbox, FolderMapping mapping) {
-            String folderId = mailbox.resolveFolder(mapping.source());
+        private void copyFolder(GraphSource source, FolderMapping mapping) {
+            String folderId = source.resolveFolder(mapping.source());
             Optional<Store.Checkpoint> checkpoint = store.checkpoint(account.name(), mapping.source());
             String deltaLink = checkpoint.map(Store.Checkpoint::deltaLink).orElse(null);
             if (mapping.removeSourceAfterSync() && checkpoint.map(c -> !c.removalEnabled()).orElse(false)) {
@@ -197,10 +191,10 @@ public final class Synchronizer {
             }
             Changes changes;
             try {
-                changes = mailbox.changes(folderId, deltaLink);
+                changes = source.changes(folderId, deltaLink);
             } catch (DeltaExpiredException e) {
                 LOG.info("account {}: delta link for {} expired, rereading the whole folder", account.name(), mapping.source());
-                changes = mailbox.changes(folderId, null);
+                changes = source.changes(folderId, null);
             }
             int failedBefore = failed;
             boolean interrupted = false;
@@ -210,16 +204,13 @@ public final class Synchronizer {
                     break;
                 }
                 try {
-                    copyMessage(mailbox, mapping, message);
+                    copyMessage(source, mapping, message);
                 } catch (MessageGoneException e) {
                     skipped++;
                 } catch (ThrottledException | DestinationUnavailableException e) {
                     throw e;
                 } catch (GraphException | DestinationException e) {
-                    failed++;
-                    String error = mapping.source() + ": message " + message.id() + ": " + e.getMessage();
-                    errors.add(error);
-                    LOG.warn("account {}: {}", account.name(), error, e);
+                    fail(mapping.source() + ": message " + message.id() + ": " + e.getMessage(), e);
                     if (!dryRun) {
                         store.recordError(account.name(), message.id(), e.getMessage());
                     }
@@ -234,7 +225,7 @@ public final class Synchronizer {
             }
         }
 
-        private void copyMessage(GraphMailbox mailbox, FolderMapping mapping, SourceMessage message) {
+        private void copyMessage(GraphSource source, FolderMapping mapping, SourceMessage message) {
             Optional<Receipt> receipt = store.receipt(account.name(), message.id());
             State state = receipt.map(Receipt::state).orElse(null);
             if (state == State.REMOVED || (state == State.IMPORTED && !mapping.removeSourceAfterSync())) {
@@ -253,11 +244,11 @@ public final class Synchronizer {
                 return;
             }
             if (state != State.IMPORTED) {
-                upload(mailbox, mapping, message, receipt.orElse(null));
+                upload(source, mapping, message, receipt.orElse(null));
             }
             if (mapping.removeSourceAfterSync()) {
                 try {
-                    mailbox.moveToDeletedItems(message.id());
+                    source.moveToDeletedItems(message.id());
                 } catch (MessageGoneException e) {
                     LOG.debug("account {}: message {} was already gone from the source", account.name(), message.id());
                 }
@@ -266,36 +257,46 @@ public final class Synchronizer {
             }
         }
 
-        private void upload(GraphMailbox mailbox, FolderMapping mapping, SourceMessage message, Receipt pending) {
-            byte[] mime = ImapDestination.canonical(mailbox.mime(message.id()));
-            // An earlier upload without a known outcome is checked against the destination it went
-            // to, which may differ from the current configuration.
-            String destinationName = pending != null ? pending.destination() : mapping.destination();
-            String folder = pending != null ? pending.destinationFolder() : mapping.folder();
-            DestinationMailbox destination = connections.get(destinationName);
-            if (pending != null) {
-                OptionalLong found = destination.find(folder, mime);
-                if (found.isPresent()) {
-                    store.markImported(account.name(), message.id(), found.getAsLong(), clock.instant());
-                    imported++;
-                    return;
-                }
+        private void upload(GraphSource source, FolderMapping mapping, SourceMessage message, Receipt pending) {
+            byte[] mime = Fingerprint.canonical(source.mime(message.id()));
+            Fingerprint fingerprint = Fingerprint.of(mime);
+            if (pending != null && foundEarlierUpload(pending, fingerprint)) {
+                imported++;
+                return;
             }
-            store.savePending(new Receipt(account.name(), message.id(), State.PENDING, mapping.source(), destinationName,
-                    folder, message.internetMessageId(), ImapDestination.sha256(mime), mime.length, null,
+            DestinationConnection destination = connections.get(mapping.destination());
+            store.savePending(new Receipt(account.name(), message.id(), State.PENDING, mapping.source(), mapping.destination(),
+                    mapping.folder(), message.internetMessageId(), fingerprint.contentHash(), fingerprint.size(), null,
                     clock.instant(), null, null, null));
             Date received = message.receivedDateTime() == null ? null : Date.from(message.receivedDateTime().toInstant());
-            OptionalLong uid = destination.append(folder, mime, received);
+            OptionalLong uid = destination.append(mapping.folder(), mime, received);
             // The receipt only says IMPORTED once the server shows the copy, not when it says OK.
             OptionalLong stored = uid.isPresent()
-                    ? (destination.contains(folder, uid.getAsLong()) ? uid : OptionalLong.empty())
-                    : destination.find(folder, mime);
+                    ? (destination.contains(mapping.folder(), uid.getAsLong()) ? uid : OptionalLong.empty())
+                    : destination.find(mapping.folder(), fingerprint);
             if (stored.isEmpty()) {
-                throw new DestinationException("destination " + destinationName + " accepted the upload but the message is not in "
-                        + folder, null);
+                throw new DestinationException("destination " + mapping.destination() + " accepted the upload but the message is not in "
+                        + mapping.folder(), null);
             }
             store.markImported(account.name(), message.id(), stored.getAsLong(), clock.instant());
             imported++;
+        }
+
+        /**
+         * Looks for the copy an upload without a known outcome may have stored, where that upload
+         * went and with the content recorded before it started. Microsoft may serve a message's
+         * bytes slightly differently the second time, so a fresh download would not match.
+         */
+        private boolean foundEarlierUpload(Receipt pending, Fingerprint current) {
+            if (!config.destinations().containsKey(pending.destination())) {
+                LOG.warn("account {}: message {} may already be at destination {}, which is no longer configured;"
+                        + " copying it again", account.name(), pending.messageId(), pending.destination());
+                return false;
+            }
+            OptionalLong found = connections.get(pending.destination())
+                    .find(pending.destinationFolder(), current.withContent(pending.contentHash(), pending.sizeBytes()));
+            found.ifPresent(uid -> store.markImported(account.name(), pending.messageId(), uid, clock.instant()));
+            return found.isPresent();
         }
 
         private String describe(String action, FolderMapping mapping, SourceMessage message) {

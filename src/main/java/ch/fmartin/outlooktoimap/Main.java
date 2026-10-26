@@ -10,8 +10,8 @@ import ch.fmartin.outlooktoimap.service.Heartbeat;
 import ch.fmartin.outlooktoimap.service.PollService;
 import ch.fmartin.outlooktoimap.store.Store;
 import ch.fmartin.outlooktoimap.store.Store.AccountStatus;
-import ch.fmartin.outlooktoimap.sync.RunReport;
-import ch.fmartin.outlooktoimap.sync.Synchronizer;
+import ch.fmartin.outlooktoimap.poll.PollReport;
+import ch.fmartin.outlooktoimap.poll.Poller;
 import java.io.PrintWriter;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -115,7 +115,7 @@ public final class Main {
         Config config = config();
         try (Store store = Store.open(config.database())) {
             PrintWriter out = spec.commandLine().getOut();
-            Optional<RunReport> report = service(config, store).pollOnce(dryRun, line -> {
+            Optional<PollReport> report = service(config, store).pollOnce(dryRun, line -> {
                 out.println(line);
                 out.flush();
             });
@@ -141,8 +141,7 @@ public final class Main {
                 }
                 AccountStatus s = status.get();
                 out.println(account.name() + ": last success " + (s.lastSuccessAt() == null ? "never" : s.lastSuccessAt())
-                        + ", last attempt " + s.lastAttemptAt() + ", last poll " + s.imported() + " imported, " + s.removed()
-                        + " removed, " + s.skipped() + " skipped, " + s.failed() + " failed");
+                        + ", last attempt " + s.lastAttemptAt() + ", last poll " + s.counts());
                 if (s.lastError() != null) {
                     out.println("  error: " + s.lastError());
                 }
@@ -157,7 +156,7 @@ public final class Main {
 
     private static PollService service(Config config, Store store) {
         MicrosoftLogin login = new MicrosoftLogin(config.stateDirectory());
-        return new PollService(new Synchronizer(config, store, login), store,
+        return new PollService(new Poller(config, store, login), store,
                 new Heartbeat(config.monitoring().heartbeatUrl()), config.pollInterval(), Clock.systemUTC());
     }
 

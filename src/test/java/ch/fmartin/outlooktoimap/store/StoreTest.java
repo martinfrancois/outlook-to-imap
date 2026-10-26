@@ -49,7 +49,7 @@ class StoreTest {
             assertThat(imported.destinationUid()).isEqualTo(42L);
             assertThat(imported.importedAt()).isEqualTo(T0.plusSeconds(1));
             assertThat(imported.lastError()).isNull();
-            assertThat(imported.sha256()).isEqualTo("a".repeat(64));
+            assertThat(imported.contentHash()).isEqualTo("a".repeat(64));
 
             store.markRemoved("hotmail", LONG_IMMUTABLE_ID, T0.plusSeconds(2));
             Receipt removed = store.receipt("hotmail", LONG_IMMUTABLE_ID).get();
@@ -92,13 +92,13 @@ class StoreTest {
     @MethodSource("engines")
     void aFailedPollKeepsTheLastSuccess(Engine engine) {
         try (Store store = Store.open(Databases.fresh(engine, directory))) {
-            store.saveStatus(new AccountStatus("hotmail", T0, T0.plusSeconds(5), 3, 1, 2, 0, null));
-            store.saveStatus(new AccountStatus("hotmail", T0.plusSeconds(60), null, 0, 0, 0, 1, "throttled"));
+            store.saveStatus(new AccountStatus("hotmail", T0, T0.plusSeconds(5), new Counts(3, 1, 2, 0), null));
+            store.saveStatus(new AccountStatus("hotmail", T0.plusSeconds(60), null, new Counts(0, 0, 0, 1), "throttled"));
 
             AccountStatus status = store.statuses().getFirst();
             assertThat(status.lastAttemptAt()).isEqualTo(T0.plusSeconds(60));
             assertThat(status.lastSuccessAt()).isEqualTo(T0.plusSeconds(5));
-            assertThat(status.failed()).isEqualTo(1);
+            assertThat(status.counts().failed()).isEqualTo(1);
             assertThat(status.lastError()).isEqualTo("throttled");
         }
     }

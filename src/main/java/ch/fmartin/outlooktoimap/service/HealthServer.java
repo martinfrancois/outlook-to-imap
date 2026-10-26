@@ -2,15 +2,16 @@ package ch.fmartin.outlooktoimap.service;
 
 import ch.fmartin.outlooktoimap.store.Store;
 import ch.fmartin.outlooktoimap.store.Store.AccountStatus;
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
+import java.time.Instant;
 import java.util.List;
-import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -20,9 +21,13 @@ import tools.jackson.databind.json.JsonMapper;
  */
 public final class HealthServer implements AutoCloseable {
 
+    private static final Logger LOG = LoggerFactory.getLogger(HealthServer.class);
     private static final ObjectMapper JSON = JsonMapper.builder().build();
 
     private final HttpServer server;
+
+    /** The body of every reply. {@code error} is set only when the status could not be read. */
+    record Health(String status, Instant lastPollFinishedAt, List<AccountStatus> accounts, String error) {}
 
     public HealthServer(int port, PollService service, Store store) {
         try {
@@ -36,40 +41,26 @@ public final class HealthServer implements AutoCloseable {
                     exchange.sendResponseHeaders(405, -1);
                     return;
                 }
-                boolean healthy = service.healthy();
-                byte[] body = JSON.writeValueAsBytes(body(healthy, service, store.statuses()));
-                exchange.getResponseHeaders().set("Content-Type", "application/json");
-                exchange.sendResponseHeaders(healthy ? 200 : 503, body.length);
-                try (OutputStream out = exchange.getResponseBody()) {
-                    out.write(body);
+                Health health;
+                try {
+                    boolean healthy = service.healthy();
+                    health = new Health(healthy ? "up" : "down", service.lastFinished(), store.statuses(), null);
+                } catch (RuntimeException e) {
+                    LOG.warn("/health could not read the status", e);
+                    health = new Health("down", service.lastFinished(), List.of(), e.toString());
                 }
-            } catch (RuntimeException e) {
-                byte[] body = ("{\"status\":\"down\",\"error\":" + JSON.writeValueAsString(e.toString()) + "}")
-                        .getBytes(StandardCharsets.UTF_8);
-                exchange.sendResponseHeaders(503, body.length);
-                exchange.getResponseBody().write(body);
+                send(exchange, "up".equals(health.status()) ? 200 : 503, JSON.writeValueAsBytes(health));
             }
         });
         server.start();
     }
 
-    private static Map<String, Object> body(boolean healthy, PollService service, List<AccountStatus> statuses) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("status", healthy ? "up" : "down");
-        body.put("lastPollFinishedAt", service.lastFinished() == null ? null : service.lastFinished().toString());
-        body.put("accounts", statuses.stream().map(s -> {
-            Map<String, Object> account = new LinkedHashMap<>();
-            account.put("account", s.account());
-            account.put("lastAttemptAt", s.lastAttemptAt().toString());
-            account.put("lastSuccessAt", s.lastSuccessAt() == null ? null : s.lastSuccessAt().toString());
-            account.put("imported", s.imported());
-            account.put("removed", s.removed());
-            account.put("skipped", s.skipped());
-            account.put("failed", s.failed());
-            account.put("lastError", s.lastError());
-            return account;
-        }).toList());
-        return body;
+    private static void send(HttpExchange exchange, int status, byte[] body) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(status, body.length);
+        try (OutputStream out = exchange.getResponseBody()) {
+            out.write(body);
+        }
     }
 
     public int port() {

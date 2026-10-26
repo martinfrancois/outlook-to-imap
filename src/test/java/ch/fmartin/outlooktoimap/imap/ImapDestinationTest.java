@@ -60,10 +60,10 @@ class ImapDestinationTest {
     void findsAStoredMessageByItsContent() {
         byte[] mime = TestMessages.mime("m1");
         try (ImapDestination destination = imap.connect(destination())) {
-            assertThat(destination.find("Junk", mime)).isEmpty();
+            assertThat(destination.find("Junk", fingerprint(mime))).isEmpty();
             long uid = destination.append("Junk", mime, null).getAsLong();
 
-            assertThat(destination.find("Junk", mime)).hasValue(uid);
+            assertThat(destination.find("Junk", fingerprint(mime))).hasValue(uid);
         }
     }
 
@@ -75,7 +75,7 @@ class ImapDestinationTest {
         try (ImapDestination destination = imap.connect(destination())) {
             destination.append("Junk", first, null);
 
-            assertThat(destination.find("Junk", second)).isEmpty();
+            assertThat(destination.find("Junk", fingerprint(second))).isEmpty();
         }
     }
 
@@ -87,8 +87,8 @@ class ImapDestinationTest {
             long a = destination.append("Junk", noId, null).getAsLong();
             long b = destination.append("Junk", nothing, null).getAsLong();
 
-            assertThat(destination.find("Junk", noId)).hasValue(a);
-            assertThat(destination.find("Junk", nothing)).hasValue(b);
+            assertThat(destination.find("Junk", fingerprint(noId))).hasValue(a);
+            assertThat(destination.find("Junk", fingerprint(nothing))).hasValue(b);
         }
     }
 
@@ -96,12 +96,12 @@ class ImapDestinationTest {
     void canonicalFormUsesCrlfLineEndings() {
         byte[] lf = "Subject: x\nTo: a@b\n\nbody\n".getBytes(StandardCharsets.US_ASCII);
 
-        assertThat(new String(ImapDestination.canonical(lf), StandardCharsets.US_ASCII))
+        assertThat(new String(Fingerprint.canonical(lf), StandardCharsets.US_ASCII))
                 .isEqualTo("Subject: x\r\nTo: a@b\r\n\r\nbody\r\n");
         try (ImapDestination destination = imap.connect(destination())) {
-            byte[] canonical = ImapDestination.canonical(lf);
+            byte[] canonical = Fingerprint.canonical(lf);
             destination.append("Junk", canonical, null);
-            assertThat(destination.find("Junk", canonical)).isPresent();
+            assertThat(destination.find("Junk", fingerprint(canonical))).isPresent();
         }
     }
 
@@ -113,6 +113,17 @@ class ImapDestinationTest {
         Destination bad = new Destination(good.name(), good.host(), good.port(), good.security(), good.username(), wrong);
 
         assertThatThrownBy(() -> imap.connect(bad)).isInstanceOf(DestinationUnavailableException.class);
+    }
+
+    @Test
+    void anUnreadablePasswordFileMakesOnlyThisDestinationUnavailable() {
+        Destination good = destination();
+        Destination missing = new Destination(good.name(), good.host(), good.port(), good.security(), good.username(),
+                directory.resolve("deleted-password"));
+
+        assertThatThrownBy(() -> imap.connect(missing))
+                .isInstanceOf(DestinationUnavailableException.class)
+                .hasMessageContaining("deleted-password");
     }
 
     @Test
@@ -134,5 +145,9 @@ class ImapDestinationTest {
 
     private Destination destination() {
         return imap.destination("fastmail", directory);
+    }
+
+    private static Fingerprint fingerprint(byte[] mime) {
+        return Fingerprint.of(Fingerprint.canonical(mime));
     }
 }

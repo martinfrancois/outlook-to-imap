@@ -1,4 +1,4 @@
-package ch.fmartin.outlooktoimap.sync;
+package ch.fmartin.outlooktoimap.poll;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
@@ -19,10 +19,12 @@ import ch.fmartin.outlooktoimap.config.Config.Destination;
 import ch.fmartin.outlooktoimap.config.Config.FolderMapping;
 import ch.fmartin.outlooktoimap.config.Config.Microsoft;
 import ch.fmartin.outlooktoimap.config.Config.Monitoring;
-import ch.fmartin.outlooktoimap.imap.DestinationMailbox;
+import ch.fmartin.outlooktoimap.imap.DestinationConnection;
+import ch.fmartin.outlooktoimap.imap.Fingerprint;
 import ch.fmartin.outlooktoimap.imap.ImapDestination.DestinationUnavailableException;
 import ch.fmartin.outlooktoimap.microsoft.AccessTokens;
 import ch.fmartin.outlooktoimap.microsoft.ReauthorizationRequiredException;
+import ch.fmartin.outlooktoimap.store.Counts;
 import ch.fmartin.outlooktoimap.store.Store;
 import ch.fmartin.outlooktoimap.store.Store.State;
 import java.nio.charset.StandardCharsets;
@@ -44,7 +46,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
-class SynchronizerTest {
+class PollerTest {
 
     private static final String JUNK = "Outlook Junk";
 
@@ -84,10 +86,10 @@ class SynchronizerTest {
         graph.deltaRound("junkemail", "t1", "t2", List.of(List.of()));
         Config config = config(account("hotmail", false));
 
-        RunReport first = poll(config);
+        PollReport first = poll(config);
 
         assertThat(first.succeeded()).isTrue();
-        assertThat(first.accounts().getFirst().imported()).isEqualTo(5);
+        assertThat(first.accounts().getFirst().counts().imported()).isEqualTo(5);
         assertThat(fastmail.messages(JUNK)).hasSize(5);
         assertThat(new String(fastmail.messages(JUNK).getFirst(), StandardCharsets.UTF_8))
                 .isEqualTo(new String(TestMessages.mime("m0"), StandardCharsets.UTF_8));
@@ -96,13 +98,13 @@ class SynchronizerTest {
         // The user deletes the spam in Fastmail. The next round lists nothing new, and even a full
         // reread (an expired delta link) must not bring the deleted copies back.
         fastmail.deleteAll(JUNK);
-        assertThat(poll(config).accounts().getFirst().imported()).isZero();
+        assertThat(poll(config).accounts().getFirst().counts().imported()).isZero();
         graph.expireDeltaToken("junkemail", "t2");
         graph.deltaRound("junkemail", null, "t3", FakeGraph.pages(backlog, 2));
-        RunReport reread = poll(config);
+        PollReport reread = poll(config);
 
-        assertThat(reread.accounts().getFirst().imported()).isZero();
-        assertThat(reread.accounts().getFirst().skipped()).isEqualTo(5);
+        assertThat(reread.accounts().getFirst().counts().imported()).isZero();
+        assertThat(reread.accounts().getFirst().counts().skipped()).isEqualTo(5);
         assertThat(fastmail.messages(JUNK)).isEmpty();
         assertThat(graph.moves()).isZero();
     }
@@ -124,9 +126,9 @@ class SynchronizerTest {
         stubOne("m1");
         graph.moveSucceeds();
 
-        RunReport report = poll(config(account("hotmail", true)));
+        PollReport report = poll(config(account("hotmail", true)));
 
-        assertThat(report.accounts().getFirst().removed()).isEqualTo(1);
+        assertThat(report.accounts().getFirst().counts().removed()).isEqualTo(1);
         assertThat(fastmail.messages(JUNK)).hasSize(1);
         assertThat(graph.moves("m1")).isEqualTo(1);
         assertThat(store.receipt("hotmail", "m1").get().state()).isEqualTo(State.REMOVED);
@@ -144,10 +146,10 @@ class SynchronizerTest {
         graph.deltaRound("junkemail", "t1", "t2", List.of(List.of()));
         graph.moveSucceeds();
 
-        RunReport report = poll(config(account("hotmail", true)));
+        PollReport report = poll(config(account("hotmail", true)));
 
-        assertThat(report.accounts().getFirst().removed()).isEqualTo(2);
-        assertThat(report.accounts().getFirst().imported()).isZero();
+        assertThat(report.accounts().getFirst().counts().removed()).isEqualTo(2);
+        assertThat(report.accounts().getFirst().counts().imported()).isZero();
         assertThat(fastmail.messages(JUNK)).isEmpty();
         assertThat(graph.moves("old1")).isEqualTo(1);
         assertThat(graph.moves("old2")).isEqualTo(1);
@@ -163,18 +165,37 @@ class SynchronizerTest {
         graph.moveFailsOnce("m1", 500);
         Config config = config(account("hotmail", true));
 
-        RunReport first = poll(config);
+        PollReport first = poll(config);
         assertThat(first.succeeded()).isFalse();
         assertThat(store.receipt("hotmail", "m1").get().state()).isEqualTo(State.IMPORTED);
 
         reopenStore();
-        RunReport second = poll(config);
+        PollReport second = poll(config);
 
         assertThat(second.succeeded()).isTrue();
-        assertThat(second.accounts().getFirst().removed()).isEqualTo(1);
-        assertThat(second.accounts().getFirst().imported()).isZero();
+        assertThat(second.accounts().getFirst().counts().removed()).isEqualTo(1);
+        assertThat(second.accounts().getFirst().counts().imported()).isZero();
         assertThat(fastmail.messages(JUNK)).hasSize(1);
         assertThat(store.receipt("hotmail", "m1").get().state()).isEqualTo(State.REMOVED);
+    }
+
+    @Test
+    void aRemovalWhoseReplyWasLostCopiesNothingAgainOnceTheMessageIsGone() {
+        open(Engine.SQLITE);
+        stubOne("m1");
+        // Microsoft moved the message, but the reply that said so never arrived.
+        graph.moveFailsOnce("m1", 500);
+        Config config = config(account("hotmail", true));
+        assertThat(poll(config).succeeded()).isFalse();
+        graph.deltaRound("junkemail", null, "t2", List.of(List.of(Item.removed("m1"))));
+
+        PollReport second = poll(config);
+
+        assertThat(second.succeeded()).isTrue();
+        assertThat(second.accounts().getFirst().counts()).isEqualTo(new Counts(0, 0, 0, 0));
+        assertThat(fastmail.messages(JUNK)).hasSize(1);
+        assertThat(graph.moves("m1")).isEqualTo(1);
+        assertThat(store.checkpoint("hotmail", "junkemail").get().deltaLink()).endsWith("t2");
     }
 
     @Test
@@ -184,7 +205,7 @@ class SynchronizerTest {
         graph.server.stubFor(com.github.tomakehurst.wiremock.client.WireMock.post(urlPathEqualTo("/v1.0/me/messages/m1/move"))
                 .willReturn(FakeGraph.error(404, "ErrorItemNotFound")));
 
-        RunReport report = poll(config(account("hotmail", true)));
+        PollReport report = poll(config(account("hotmail", true)));
 
         assertThat(report.succeeded()).isTrue();
         assertThat(store.receipt("hotmail", "m1").get().state()).isEqualTo(State.REMOVED);
@@ -198,7 +219,7 @@ class SynchronizerTest {
         Config config = config(account("hotmail", true));
 
         // The server stores the message, then the connection drops before its reply arrives.
-        RunReport first = poll(config, d -> new FailingAfterAppend(fastmail.connect(d)));
+        PollReport first = poll(config, d -> new FailingAfterAppend(fastmail.connect(d)));
 
         assertThat(first.succeeded()).isFalse();
         assertThat(store.receipt("hotmail", "m1").get().state()).isEqualTo(State.PENDING);
@@ -206,12 +227,49 @@ class SynchronizerTest {
         assertThat(fastmail.messages(JUNK)).hasSize(1);
 
         reopenStore();
-        RunReport second = poll(config);
+        PollReport second = poll(config);
 
         assertThat(second.succeeded()).isTrue();
-        assertThat(second.accounts().getFirst().imported()).isEqualTo(1);
+        assertThat(second.accounts().getFirst().counts().imported()).isEqualTo(1);
         assertThat(fastmail.messages(JUNK)).hasSize(1);
         assertThat(graph.moves("m1")).isEqualTo(1);
+    }
+
+    @Test
+    void anEarlierUploadIsFoundByTheRecordedHashEvenWhenMicrosoftServesDifferentBytesLater() {
+        open(Engine.SQLITE);
+        stubOne("m1");
+        byte[] original = TestMessages.mime("m1");
+        Config config = config(account("hotmail", false));
+        poll(config, d -> new FailingAfterAppend(fastmail.connect(d)));
+        // Same message, but Microsoft regenerated its MIME, so a fresh download hashes differently.
+        graph.mime("m1", TestMessages.mime("<m1@example.test>", "Win a prize m1 (regenerated)", "Wed, 01 Oct 2026 08:00:00 +0000"));
+
+        PollReport second = poll(config);
+
+        assertThat(second.succeeded()).isTrue();
+        assertThat(second.accounts().getFirst().counts().imported()).isEqualTo(1);
+        assertThat(fastmail.messages(JUNK)).singleElement().isEqualTo(original);
+    }
+
+    @Test
+    void aPendingUploadToADestinationNoLongerConfiguredIsCopiedToTheCurrentOne() {
+        open(Engine.SQLITE);
+        stubOne("m1");
+        poll(config(account("hotmail", false)), d -> new FailingAfterAppend(fastmail.connect(d)));
+        assertThat(store.receipt("hotmail", "m1").get().state()).isEqualTo(State.PENDING);
+        try (FakeImap dovecot = new FakeImap()) {
+            Account moved = new Account("hotmail", "hotmail@hotmail.test", "app", "consumers",
+                    List.of(new FolderMapping("junkemail", "dovecot", JUNK, false)));
+            Config config = new Config(new Microsoft("app", "consumers"), directory, database, Duration.ofHours(1),
+                    new Monitoring(0, null), Map.of("dovecot", dovecot.destination("dovecot", directory)), List.of(moved));
+
+            PollReport report = poll(config, dovecot::connect);
+
+            assertThat(report.succeeded()).isTrue();
+            assertThat(dovecot.messages(JUNK)).hasSize(1);
+            assertThat(store.receipt("hotmail", "m1").get().destination()).isEqualTo("dovecot");
+        }
     }
 
     @Test
@@ -220,13 +278,13 @@ class SynchronizerTest {
         stubOne("m1");
         Config config = config(account("hotmail", false));
 
-        RunReport first = poll(config, d -> new FailingBeforeAppend(fastmail.connect(d)));
+        PollReport first = poll(config, d -> new FailingBeforeAppend(fastmail.connect(d)));
         assertThat(first.succeeded()).isFalse();
         assertThat(fastmail.messages(JUNK)).isEmpty();
 
-        RunReport second = poll(config);
+        PollReport second = poll(config);
 
-        assertThat(second.accounts().getFirst().imported()).isEqualTo(1);
+        assertThat(second.accounts().getFirst().counts().imported()).isEqualTo(1);
         assertThat(fastmail.messages(JUNK)).hasSize(1);
     }
 
@@ -239,19 +297,19 @@ class SynchronizerTest {
         graph.deltaRound("junkemail", null, "t1", List.of(items));
         Config config = config(account("hotmail", false));
 
-        RunReport first = poll(config);
+        PollReport first = poll(config);
 
-        assertThat(first.accounts().getFirst().imported()).isEqualTo(2);
-        assertThat(first.accounts().getFirst().failed()).isEqualTo(1);
+        assertThat(first.accounts().getFirst().counts().imported()).isEqualTo(2);
+        assertThat(first.accounts().getFirst().counts().failed()).isEqualTo(1);
         assertThat(store.checkpoint("hotmail", "junkemail")).isEmpty();
 
         graph.server.resetMappings();
         items.forEach(i -> graph.mime(i.id(), TestMessages.mime(i.id())));
         graph.deltaRound("junkemail", null, "t1", List.of(items));
-        RunReport second = poll(config);
+        PollReport second = poll(config);
 
-        assertThat(second.accounts().getFirst().imported()).isEqualTo(1);
-        assertThat(second.accounts().getFirst().skipped()).isEqualTo(2);
+        assertThat(second.accounts().getFirst().counts().imported()).isEqualTo(1);
+        assertThat(second.accounts().getFirst().counts().skipped()).isEqualTo(2);
         assertThat(fastmail.messages(JUNK)).hasSize(3);
     }
 
@@ -268,12 +326,12 @@ class SynchronizerTest {
             return "token";
         };
 
-        RunReport report = poll(config(broken, working), tokens, null);
+        PollReport report = poll(config(broken, working), tokens, null);
 
         assertThat(report.accounts()).extracting(AccountResult::account).containsExactly("live", "hotmail");
         assertThat(report.accounts().get(0).succeeded()).isFalse();
         assertThat(report.accounts().get(0).error()).contains("outlook-to-imap authorize live");
-        assertThat(report.accounts().get(1).imported()).isEqualTo(1);
+        assertThat(report.accounts().get(1).counts().imported()).isEqualTo(1);
         assertThat(store.statuses()).extracting(Store.AccountStatus::account).containsExactly("hotmail", "live");
         assertThat(store.statuses().get(1).lastSuccessAt()).isNull();
     }
@@ -288,10 +346,10 @@ class SynchronizerTest {
         Account throttled = new Account("throttled", "t@hotmail.test", "app", "consumers",
                 List.of(new FolderMapping("inbox", "fastmail", "Throttled Inbox", false)));
 
-        RunReport report = poll(config(throttled, account("hotmail", false)));
+        PollReport report = poll(config(throttled, account("hotmail", false)));
 
         assertThat(report.accounts().get(0).error()).contains("throttled");
-        assertThat(report.accounts().get(1).imported()).isEqualTo(1);
+        assertThat(report.accounts().get(1).counts().imported()).isEqualTo(1);
         assertThat(store.checkpoint("throttled", "inbox")).isEmpty();
     }
 
@@ -305,9 +363,9 @@ class SynchronizerTest {
                 new FolderMapping("inbox", "fastmail", "Outlook Inbox", false),
                 new FolderMapping("archive", "fastmail", "Outlook Archive", false)));
 
-        RunReport report = poll(config(account));
+        PollReport report = poll(config(account));
 
-        assertThat(report.accounts().getFirst().imported()).isEqualTo(1);
+        assertThat(report.accounts().getFirst().counts().imported()).isEqualTo(1);
         assertThat(fastmail.messages("Outlook Inbox")).hasSize(1);
         assertThat(fastmail.messages("Outlook Archive")).isEmpty();
     }
@@ -329,7 +387,7 @@ class SynchronizerTest {
             Config config = new Config(new Microsoft("app", "consumers"), directory, database, Duration.ofHours(1),
                     new Monitoring(0, null), destinations, List.of(account));
 
-            RunReport report = new Synchronizer(config, store, a -> "token", a -> graph.mailbox(),
+            PollReport report = new Poller(config, store, a -> "token", a -> graph.source(),
                     d -> (d.name().equals("fastmail") ? fastmail : other).connect(d), Clock.systemUTC())
                     .poll(false, line -> {}, () -> false, () -> {});
 
@@ -345,7 +403,7 @@ class SynchronizerTest {
         stubOne("m1");
         List<String> plan = new ArrayList<>();
 
-        RunReport report = synchronizer(config(account("hotmail", true)), a -> "token", null)
+        PollReport report = poller(config(account("hotmail", true)), a -> "token", null)
                 .poll(true, plan::add, () -> false, () -> {});
 
         assertThat(report.succeeded()).isTrue();
@@ -368,10 +426,10 @@ class SynchronizerTest {
         graph.deltaRound("junkemail", null, "t1", List.of(items));
         AtomicInteger handled = new AtomicInteger();
 
-        RunReport report = synchronizer(config(account("hotmail", false)), a -> "token", null)
+        PollReport report = poller(config(account("hotmail", false)), a -> "token", null)
                 .poll(false, line -> {}, () -> handled.get() >= 1, handled::incrementAndGet);
 
-        assertThat(report.accounts().getFirst().imported()).isEqualTo(1);
+        assertThat(report.accounts().getFirst().counts().imported()).isEqualTo(1);
         assertThat(store.checkpoint("hotmail", "junkemail")).isEmpty();
     }
 
@@ -400,25 +458,25 @@ class SynchronizerTest {
                 new Monitoring(0, null), Map.of("fastmail", fastmail.destination("fastmail", directory)), List.of(accounts));
     }
 
-    private RunReport poll(Config config) {
+    private PollReport poll(Config config) {
         return poll(config, a -> "token", null);
     }
 
-    private RunReport poll(Config config, Function<Destination, DestinationMailbox> destinations) {
+    private PollReport poll(Config config, Function<Destination, DestinationConnection> destinations) {
         return poll(config, a -> "token", destinations);
     }
 
-    private RunReport poll(Config config, AccessTokens tokens, Function<Destination, DestinationMailbox> destinations) {
-        return synchronizer(config, tokens, destinations).poll(false, line -> {}, () -> false, () -> {});
+    private PollReport poll(Config config, AccessTokens tokens, Function<Destination, DestinationConnection> destinations) {
+        return poller(config, tokens, destinations).poll(false, line -> {}, () -> false, () -> {});
     }
 
-    private Synchronizer synchronizer(Config config, AccessTokens tokens, Function<Destination, DestinationMailbox> destinations) {
-        return new Synchronizer(config, store, tokens, a -> graph.mailbox(),
+    private Poller poller(Config config, AccessTokens tokens, Function<Destination, DestinationConnection> destinations) {
+        return new Poller(config, store, tokens, a -> graph.source(),
                 destinations != null ? destinations : fastmail::connect, Clock.systemUTC());
     }
 
     /** Stores the message, then reports the connection lost, as when a reply never arrives. */
-    private record FailingAfterAppend(DestinationMailbox delegate) implements DestinationMailbox {
+    private record FailingAfterAppend(DestinationConnection delegate) implements DestinationConnection {
         @Override
         public OptionalLong append(String folder, byte[] mime, Date received) {
             delegate.append(folder, mime, received);
@@ -431,8 +489,8 @@ class SynchronizerTest {
         }
 
         @Override
-        public OptionalLong find(String folder, byte[] mime) {
-            return delegate.find(folder, mime);
+        public OptionalLong find(String folder, Fingerprint fingerprint) {
+            return delegate.find(folder, fingerprint);
         }
 
         @Override
@@ -442,7 +500,7 @@ class SynchronizerTest {
     }
 
     /** Loses the connection before anything reaches the server. */
-    private record FailingBeforeAppend(DestinationMailbox delegate) implements DestinationMailbox {
+    private record FailingBeforeAppend(DestinationConnection delegate) implements DestinationConnection {
         @Override
         public OptionalLong append(String folder, byte[] mime, Date received) {
             throw new DestinationUnavailableException("fastmail", new java.io.IOException("connection refused"));
@@ -454,8 +512,8 @@ class SynchronizerTest {
         }
 
         @Override
-        public OptionalLong find(String folder, byte[] mime) {
-            return delegate.find(folder, mime);
+        public OptionalLong find(String folder, Fingerprint fingerprint) {
+            return delegate.find(folder, fingerprint);
         }
 
         @Override

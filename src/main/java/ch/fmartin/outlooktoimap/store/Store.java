@@ -1,11 +1,11 @@
 package ch.fmartin.outlooktoimap.store;
 
 import ch.fmartin.outlooktoimap.config.Config.Database;
+import ch.fmartin.outlooktoimap.config.SecretFile;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.ResultSet;
@@ -33,7 +33,7 @@ public final class Store implements AutoCloseable {
             String destination,
             String destinationFolder,
             String internetMessageId,
-            String sha256,
+            String contentHash,
             long sizeBytes,
             Long destinationUid,
             Instant createdAt,
@@ -47,12 +47,10 @@ public final class Store implements AutoCloseable {
             String account,
             Instant lastAttemptAt,
             Instant lastSuccessAt,
-            int imported,
-            int removed,
-            int skipped,
-            int failed,
+            Counts counts,
             String lastError) {}
 
+    // Keeps a pathological error message from bloating the database; the columns are TEXT.
     private static final int MAX_ERROR_LENGTH = 2000;
 
     private final HikariDataSource dataSource;
@@ -68,8 +66,8 @@ public final class Store implements AutoCloseable {
         HikariConfig hikari = new HikariConfig();
         hikari.setJdbcUrl(database.url());
         hikari.setPoolName("outlook-to-imap");
-        if (database.url().startsWith("jdbc:sqlite:")) {
-            createParentDirectory(database.url().substring("jdbc:sqlite:".length()));
+        if (database.isSqlite()) {
+            createParentDirectory(database.url().substring(Database.SQLITE_PREFIX.length()));
             // SQLite locks the whole file per write; waiting beats failing when the health
             // endpoint reads while a poll writes.
             hikari.addDataSourceProperty("busy_timeout", "30000");
@@ -81,7 +79,7 @@ public final class Store implements AutoCloseable {
             hikari.setUsername(database.username());
         }
         if (database.passwordFile() != null) {
-            hikari.setPassword(readPassword(database.passwordFile()));
+            hikari.setPassword(SecretFile.read(database.passwordFile()));
         }
         HikariDataSource dataSource = new HikariDataSource(hikari);
         try {
@@ -105,14 +103,6 @@ public final class Store implements AutoCloseable {
         }
     }
 
-    private static String readPassword(Path file) {
-        try {
-            return Files.readString(file, StandardCharsets.UTF_8).strip();
-        } catch (IOException e) {
-            throw new UncheckedIOException("cannot read database password file " + file, e);
-        }
-    }
-
     public Optional<Receipt> receipt(String account, String messageId) {
         return jdbi.withHandle(h -> h.createQuery("SELECT * FROM receipt WHERE account = :account AND message_id = :id")
                 .bind("account", account)
@@ -125,11 +115,11 @@ public final class Store implements AutoCloseable {
     public void savePending(Receipt receipt) {
         jdbi.useHandle(h -> h.createUpdate("""
                         INSERT INTO receipt (account, message_id, state, source_folder, destination, destination_folder,
-                                             internet_message_id, sha256, size_bytes, created_at)
-                        VALUES (:account, :id, 'PENDING', :source, :destination, :folder, :imid, :sha, :size, :now)
+                                             internet_message_id, content_hash, size_bytes, created_at)
+                        VALUES (:account, :id, 'PENDING', :source, :destination, :folder, :imid, :hash, :size, :now)
                         ON CONFLICT (account, message_id) DO UPDATE SET
                             source_folder = :source, destination = :destination, destination_folder = :folder,
-                            internet_message_id = :imid, sha256 = :sha, size_bytes = :size
+                            internet_message_id = :imid, content_hash = :hash, size_bytes = :size
                         """)
                 .bind("account", receipt.account())
                 .bind("id", receipt.messageId())
@@ -137,7 +127,7 @@ public final class Store implements AutoCloseable {
                 .bind("destination", receipt.destination())
                 .bind("folder", receipt.destinationFolder())
                 .bind("imid", receipt.internetMessageId())
-                .bind("sha", receipt.sha256())
+                .bind("hash", receipt.contentHash())
                 .bind("size", receipt.sizeBytes())
                 .bind("now", receipt.createdAt().toEpochMilli())
                 .execute());
@@ -208,10 +198,10 @@ public final class Store implements AutoCloseable {
                 .bind("account", status.account())
                 .bind("attempt", status.lastAttemptAt().toEpochMilli())
                 .bind("success", status.lastSuccessAt() == null ? null : status.lastSuccessAt().toEpochMilli())
-                .bind("imported", status.imported())
-                .bind("removed", status.removed())
-                .bind("skipped", status.skipped())
-                .bind("failed", status.failed())
+                .bind("imported", status.counts().imported())
+                .bind("removed", status.counts().removed())
+                .bind("skipped", status.counts().skipped())
+                .bind("failed", status.counts().failed())
                 .bind("error", truncate(status.lastError()))
                 .execute());
     }
@@ -222,10 +212,7 @@ public final class Store implements AutoCloseable {
                         rs.getString("account"),
                         instant(rs, "last_attempt_at"),
                         instant(rs, "last_success_at"),
-                        rs.getInt("imported"),
-                        rs.getInt("removed"),
-                        rs.getInt("skipped"),
-                        rs.getInt("failed"),
+                        new Counts(rs.getInt("imported"), rs.getInt("removed"), rs.getInt("skipped"), rs.getInt("failed")),
                         rs.getString("last_error")))
                 .list());
     }
@@ -235,7 +222,7 @@ public final class Store implements AutoCloseable {
      */
     public boolean acquireLease(String holder, Instant now, Instant until) {
         return jdbi.withHandle(h -> h.createUpdate("""
-                        UPDATE run_lease SET holder = :holder, expires_at = :until
+                        UPDATE poll_lease SET holder = :holder, expires_at = :until
                         WHERE id = 1 AND (holder IS NULL OR holder = :holder OR expires_at < :now)
                         """)
                 .bind("holder", holder)
@@ -245,7 +232,7 @@ public final class Store implements AutoCloseable {
     }
 
     public void releaseLease(String holder) {
-        jdbi.useHandle(h -> h.createUpdate("UPDATE run_lease SET holder = NULL, expires_at = NULL WHERE id = 1 AND holder = :holder")
+        jdbi.useHandle(h -> h.createUpdate("UPDATE poll_lease SET holder = NULL, expires_at = NULL WHERE id = 1 AND holder = :holder")
                 .bind("holder", holder)
                 .execute());
     }
@@ -266,7 +253,7 @@ public final class Store implements AutoCloseable {
                 rs.getString("destination"),
                 rs.getString("destination_folder"),
                 rs.getString("internet_message_id"),
-                rs.getString("sha256"),
+                rs.getString("content_hash"),
                 rs.getLong("size_bytes"),
                 uid,
                 instant(rs, "created_at"),

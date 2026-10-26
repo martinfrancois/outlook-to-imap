@@ -5,7 +5,7 @@ Read `README.md` for what the service does, `CONTEXT.md` for the terms the code 
 
 ## Build and test
 
-- `mvn -B verify` runs every test and the 80% instruction coverage gate. CI runs exactly this.
+- `./mvnw -B verify` runs every test and the 80% instruction coverage gate. CI runs exactly this.
 - The PostgreSQL tests need Docker or Podman through Testcontainers. With rootless Podman, set
   `DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock` and `TESTCONTAINERS_RYUK_DISABLED=true`.
 - `scripts/smoke-image.sh docker` (or `podman`) builds the image and checks it starts, answers

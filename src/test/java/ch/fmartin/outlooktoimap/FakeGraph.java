@@ -8,7 +8,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.MappingBuilder;
 import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
@@ -42,13 +42,13 @@ public final class FakeGraph implements AutoCloseable {
         return server.baseUrl() + "/v1.0";
     }
 
-    /** A mailbox client with retry delays short enough for tests. */
-    public GraphMailbox mailbox(Supplier<String> token) {
-        return new GraphMailbox(token, baseUrl(), new RetryHandlerOption(null, 2, 0));
+    /** A Graph client with retry delays short enough for tests. */
+    public GraphSource source(Supplier<String> token) {
+        return new GraphSource(token, baseUrl(), new RetryHandlerOption(null, 2, 0));
     }
 
-    public GraphMailbox mailbox() {
-        return mailbox(() -> "token");
+    public GraphSource source() {
+        return source(() -> "token");
     }
 
     public record Item(String id, String internetMessageId, OffsetDateTime received, boolean removed) {
