@@ -521,7 +521,7 @@ fails the build.
 CI tests every Java LTS from 21 upward, as listed by [endoflife.date](https://endoflife.date/eclipse-temurin)
 at run time, so a new LTS is tested from its release day. The required check on `main` is the `build`
 job, which reports the result of all the others. Renovate proposes newer LTS versions for the
-release build and the runtime image; raising the minimum of 21 waits for approval on the
+release build's JDK and the build and runtime images; raising the minimum of 21 waits for approval on the
 Dependency Dashboard.
 
 Releases come from [release-please](https://github.com/googleapis/release-please): merging its pull

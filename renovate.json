@@ -50,21 +50,6 @@
       "datasourceTemplate": "endoflife-date",
       "extractVersionTemplate": "^(?<version>\\d+)",
       "versioningTemplate": "loose"
-    },
-    {
-      "customType": "regex",
-      "description": "The Java version the release workflow builds with. The test matrix in ci.yml needs no entry: it reads every current LTS from endoflife.date at run time.",
-      "managerFilePatterns": [
-        "/^\\.github/workflows/release-please\\.yml$/"
-      ],
-      "matchStrings": [
-        "java-version: \"(?<currentValue>\\d+)\""
-      ],
-      "depNameTemplate": "java-release-build",
-      "packageNameTemplate": "eclipse-temurin",
-      "datasourceTemplate": "endoflife-date",
-      "extractVersionTemplate": "^(?<version>\\d+)",
-      "versioningTemplate": "loose"
     }
   ],
   "packageRules": [
@@ -107,20 +92,29 @@
     {
       "description": "Only Java LTS releases, which follow the four-release cadence from 25 (25, 29, 33, ...). Non-LTS releases get six months of updates, too short for a service meant to run unattended. Update this rule if the vendor LTS policy changes.",
       "matchDepNames": [
-        "java-minimum",
-        "java-release-build"
+        "java-minimum"
       ],
       "allowedVersions": "/^(?:2[59]|3[37]|[468][159]|[579][37]|[1-9][0-9]*(?:0[159]|[2468][159]|[13579][37]))$/"
     },
     {
-      "description": "Same LTS-only rule for the runtime image, whose tag is <java>-jre.",
+      "description": "Same LTS-only rule for the JDK the release workflow builds with. setup-java's java-version is a full Temurin version such as 25.0.5+8.0.LTS.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepNames": [
+        "java-jdk"
+      ],
+      "allowedVersions": "/^(?:2[59]|3[37]|[468][159]|[579][37]|[1-9][0-9]*(?:0[159]|[2468][159]|[13579][37]))\\./"
+    },
+    {
+      "description": "Same LTS-only rule for the build and runtime images, whose tags are <java>-jdk and <java>-jre.",
       "matchDatasources": [
         "docker"
       ],
       "matchPackageNames": [
         "docker.io/library/eclipse-temurin"
       ],
-      "allowedVersions": "/^(?:2[59]|3[37]|[468][159]|[579][37]|[1-9][0-9]*(?:0[159]|[2468][159]|[13579][37]))-jre$/"
+      "allowedVersions": "/^(?:2[59]|3[37]|[468][159]|[579][37]|[1-9][0-9]*(?:0[159]|[2468][159]|[13579][37]))-(?:jdk|jre)$/"
     },
     {
       "description": "Raising the minimum Java version raises the minimum for everyone running the jar, which is the maintainer's decision, so the Dependency Dashboard holds the pull request until a human ticks the box. CI already tests every newer LTS on its own.",
