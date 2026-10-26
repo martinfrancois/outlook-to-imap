@@ -2,7 +2,7 @@
 status: accepted
 date: 2026-10-26
 decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26]
+consulted: [implementing coding agent]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -24,8 +24,8 @@ Should the service accept work and school accounts, and what may the README prom
 * The README must not promise something nobody has seen work.
 * People with work accounts should be able to try it and send fixes.
 * The default configuration must stay right for personal accounts.
-* No live test is possible: the free directory created for the app registration has no Exchange
-  mailboxes.
+* No live test is possible: the free directory created for the app registration has no work
+  account with mail to read.
 
 ## Considered Options
 
@@ -35,9 +35,9 @@ Should the service accept work and school accounts, and what may the README prom
 ## Decision Outcome
 
 Chosen option: "Accept work and school accounts, marked best effort: untested and not officially
-supported", because the code cost is one setting and the owner wanted the tool to be useful to more
-people, while the label keeps the README from promising more than was tested. The owner added that
-pull requests improving work and school support are welcome.
+supported", because the code cost is one setting, and marking it best effort keeps the README from
+promising more than was tested. The owner added that pull requests improving work and school
+support are welcome.
 
 The default tenant is `consumers` (`Config.Microsoft.DEFAULT_TENANT`). `microsoft.tenant` and
 `accounts[].tenant` accept any other value, which `MicrosoftLogin` puts into the authority URL. The

@@ -1,8 +1,8 @@
 ---
 status: accepted
 date: 2026-10-26
-decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26]
+decision-makers: [implementing coding agent]
+consulted: []
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -120,12 +120,14 @@ The change is
 [outlook-to-imap pull request #21](https://github.com/martinfrancois/outlook-to-imap/pull/21), merged
 before 1.0.0. Vulnerability alerts were turned on for the repository the same day.
 
-The Renovate configuration copies the owner's baseline for public repositories, taken from
+The agent made both choices. The Renovate setup was part of the design plan the owner confirmed;
+the BOM pins came later the same day, before the release. The Renovate configuration copies the
+owner's baseline for public repositories, taken from
 junkEmailMover, and was validated with Renovate 44.181.7 in strict mode. The owner enrolled the
 repository in Renovate on 2026-10-26
 ([outlook-to-imap issue #1](https://github.com/martinfrancois/outlook-to-imap/issues/1)).
 
 The reason for leaving the API undeclared comes from the comment that closed
 [junkEmailMover issue #48](https://github.com/martinfrancois/junkEmailMover/issues/48) on
-2026-10-26. The project uses Jackson 3 for its configuration file and the `/health` body; the
-session recorded no further reason for picking 3 over 2.
+2026-10-26. The project uses Jackson 3 for its configuration file and the `/health` body; nobody
+recorded a reason for picking 3 over 2.

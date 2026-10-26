@@ -2,7 +2,7 @@
 status: accepted
 date: 2026-10-26
 decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26, "Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
+consulted: [implementing coding agent, "Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -154,26 +154,28 @@ tool does.
 ## More Information
 
 The owner asked on 2026-10-26 that a message copied once never be copied back after it was deleted
-at Fastmail. The owner chose one copy per account (answer A to the question about moved messages),
+at Fastmail. For a message moved in Outlook between two copied folders, the agent offered one copy
+per source account or one copy per folder mapping. The owner chose one copy per source account,
 which reversed the first design's per-mapping receipts. For switching removal on, the agent offered
 three options and recommended checking each copy first. The owner chose to trust the receipt,
 because someone who deleted a message at Fastmail as spam wants it gone from the source too.
 
-The `once --dry-run` preview was proposed with the removal question and kept with the chosen
-option. Its README wording was corrected in the first review round on
+The `once --dry-run` preview was proposed together with the options for switching removal on, and
+kept with the chosen one. Its README wording was corrected in the first review round on
 [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5): it
 had said a dry run writes nothing, but the token refresh rewrites the token file and Flyway creates
 the database. The same review found that the README promised nothing at the destination is ever
 changed while folders get created; the wording now says "Apart from creating a missing destination
 folder". The second review round pointed out that renaming an account copies its backlog again;
-that was documented in the README rather than changing the key. The session recorded no reason for
+that was documented in the README rather than changing the key. Nobody recorded a reason for
 keying receipts by the account's `name` rather than its `email`.
 
 The removal rules come from
 [junkEmailMover issue #66](https://github.com/martinfrancois/junkEmailMover/issues/66): off by
 default, a recoverable move to Deleted Items, never after an uncertain import, and failed removals
 retried without importing again. Making the setting per folder mapping instead of per account came
-with reading any folder. The config key keeps the word "sync" because the issue named it that way.
+with reading any folder. Why the config key still says "sync" is in
+[ADR 0018](0018-new-repository-named-outlook-to-imap.md).
 
 The live check in
 [outlook-to-imap issue #2](https://github.com/martinfrancois/outlook-to-imap/issues/2) deleted one

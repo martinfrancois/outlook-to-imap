@@ -2,7 +2,7 @@
 status: accepted
 date: 2026-10-26
 decision-makers: [martinfrancois]
-consulted: [The ADR rules in the owner's other repositories]
+consulted: [implementing coding agent]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -44,12 +44,13 @@ owner's other repositories, and the check runs in the Maven build CI already run
 
 * Good, because every record now names the options that lost and why, which stops the next person
   from retrying them.
-* Good, because `AdrConformanceTest` fails the build on a record that lacks a section, keeps a
-  template placeholder, cites an issue as a bare number, or uses an unknown status.
+* Good, because `AdrConformanceTest` fails the build on a record that lacks a section or leaves one
+  empty, keeps a template placeholder, cites an issue as a bare number or with vague link text,
+  chooses an option it didn't list, contains an em dash, or uses an unknown status.
 * Bad, because a small decision now costs a full record with front matter and option subsections.
   AGENTS.md says when that cost is owed.
-* Neutral, because the five earlier records were rewritten into the new shape on the day they were
-  written, before any release relied on them, and kept their decisions unchanged.
+* Neutral, because the five earlier records, which shipped in 1.0.0, were rewritten into the new
+  shape the same day and kept their decisions unchanged.
 
 ### Confirmation
 
@@ -77,8 +78,8 @@ Each record stays a title and a few paragraphs in whatever shape its author chos
 to 0005 were.
 
 * Good, because a record costs almost nothing to write.
-* Bad, because nothing makes the author list rejected options or how to confirm the decision; of the
-  first five, only one named what it rejected.
+* Bad, because nothing makes the author list rejected options or how to confirm the decision. Of
+  the first five, four named an option they rejected, each in a sentence or two.
 * Bad, because a test can't check a shape the files don't have.
 
 ### Nygard-style records (Context, Decision, Status, Consequences)

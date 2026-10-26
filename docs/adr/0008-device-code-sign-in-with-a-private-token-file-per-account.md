@@ -1,8 +1,8 @@
 ---
 status: accepted
 date: 2026-10-26
-decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26, "Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
+decision-makers: [implementing coding agent, approved by martinfrancois in the design plan]
+consulted: ["Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -70,11 +70,12 @@ The rules that come with it:
   sign-in on a schedule.
 * Good, because the token files stay on the local state directory even when the receipts move to a
   shared PostgreSQL server.
-* Good, because an account configured for one mailbox can't silently read another.
+* Good, because a source account configured for one address can't silently read another.
 * Bad, because switching source removal on needs a new `authorize` for that account, since the
   saved login lacks `Mail.ReadWrite`. Until then the account reports "needs a new login".
-* Bad, because anyone who can read a token file can read that mailbox until the login is revoked.
-  The README says so and tells users to back up and protect the state directory.
+* Bad, because anyone who can read a token file can read that source account's mail until the
+  login is revoked. The README says so and tells users to back up and protect the state
+  directory.
 * Neutral, because a password change, "Sign out everywhere", removing the app's consent, or more
   than 90 days without a poll still end a login. The README lists these cases.
 
@@ -136,7 +137,7 @@ Save the login of whoever signs in on the device code page, whatever the configu
 
 * Good, because it needs no check.
 * Bad, because one wrong click on the sign-in page ties an account's configuration, receipts and
-  destination folders to the wrong mailbox, with nothing to show it happened.
+  destination folders to the wrong Microsoft account, with nothing to show it happened.
 
 ## More Information
 

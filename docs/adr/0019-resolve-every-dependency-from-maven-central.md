@@ -1,8 +1,8 @@
 ---
 status: accepted
 date: 2026-10-26
-decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26]
+decision-makers: [implementing coding agent]
+consulted: ["Reviewers of [outlook-to-imap pull request #26](https://github.com/martinfrancois/outlook-to-imap/pull/26)"]
 informed: [Future maintainers and agents working on this repository]
 ---
 
