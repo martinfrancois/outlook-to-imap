@@ -15,6 +15,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  */
 public final class Databases {
 
+    /** The URL parameter that lets the store connect to the test container, which has no TLS. */
+    public static final String TLS_OFF = "sslmode=disable";
+
     private static PostgreSQLContainer postgres;
 
     private Databases() {}
@@ -48,6 +51,8 @@ public final class Databases {
             Path password = directory.resolve("postgres-password");
             Files.writeString(password, postgres.getPassword() + "\n");
             String url = postgres.getJdbcUrl().replaceFirst("/[^/?]+(\\?|$)", "/" + name + "$1");
+            // The container has no TLS, and the store requires a verified certificate by default.
+            url += (url.contains("?") ? "&" : "?") + TLS_OFF;
             return new Database(url, postgres.getUsername(), password);
         } catch (IOException e) {
             throw new UncheckedIOException(e);

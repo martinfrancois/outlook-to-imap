@@ -18,10 +18,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.flywaydb.core.Flyway;
 import org.jdbi.v3.core.Jdbi;
+import org.postgresql.Driver;
+import org.postgresql.PGProperty;
 import org.sqlite.SQLiteConfig;
 
 /**
@@ -93,6 +96,10 @@ public final class Store implements AutoCloseable {
         } else {
             newSqliteFile = Optional.empty();
             hikari.setMaximumPoolSize(4);
+            // Without it the driver falls back to plain text and never checks the certificate.
+            if (!choosesTls(database.url())) {
+                hikari.addDataSourceProperty(PGProperty.SSL_MODE.getName(), "verify-full");
+            }
         }
         if (database.username() != null) {
             hikari.setUsername(database.username());
@@ -109,6 +116,17 @@ public final class Store implements AutoCloseable {
             throw e;
         }
         return new Store(dataSource);
+    }
+
+    /**
+     * Whether a PostgreSQL URL, or the pg_service.conf entry it names, sets sslmode or ssl. pgjdbc
+     * reads sslmode before ssl, so a default sslmode would override a URL that says ssl=false.
+     */
+    private static boolean choosesTls(String url) {
+        Properties settings = Driver.parseURL(url, null);
+        // The driver refuses an invalid URL with its own message when it connects.
+        return settings != null
+                && (settings.containsKey(PGProperty.SSL_MODE.getName()) || settings.containsKey(PGProperty.SSL.getName()));
     }
 
     /** Creates the directory of a SQLite database file, and returns the file if it is new. */
