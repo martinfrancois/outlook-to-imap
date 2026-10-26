@@ -80,9 +80,11 @@ public final class Poller {
      */
     public PollReport poll(boolean dryRun, Consumer<String> plan, BooleanSupplier stop, Runnable progress) {
         List<AccountResult> results = new ArrayList<>();
+        boolean interrupted = false;
         try (Connections connections = new Connections()) {
             for (Account account : config.accounts()) {
                 if (stop.getAsBoolean()) {
+                    interrupted = true;
                     break;
                 }
                 AccountResult result = new AccountPoll(account, connections, dryRun, plan, stop, progress).execute();
@@ -93,7 +95,7 @@ public final class Poller {
                 }
             }
         }
-        return new PollReport(results);
+        return new PollReport(results, interrupted || results.stream().anyMatch(AccountResult::interrupted));
     }
 
     /** The destination connections of one poll, opened on first use and closed at the end. */
@@ -131,6 +133,7 @@ public final class Poller {
         private int skipped;
         private int failed;
         private final List<String> errors = new ArrayList<>();
+        private boolean interrupted;
 
         AccountPoll(Account account, Connections connections, boolean dryRun, Consumer<String> plan,
                 BooleanSupplier stop, Runnable progress) {
@@ -149,12 +152,13 @@ public final class Poller {
                 GraphSource source = sources.apply(account);
                 for (FolderMapping mapping : account.folders()) {
                     if (stop.getAsBoolean()) {
+                        interrupted = true;
                         break;
                     }
                     try {
                         copyFolder(source, mapping);
                     } catch (DestinationUnavailableException e) {
-                        connections.drop(mapping.destination());
+                        connections.drop(e.destination());
                         fail(mapping.source() + ": " + e.getMessage(), e);
                     } catch (ThrottledException | ReauthorizationRequiredException e) {
                         throw e;
@@ -170,7 +174,7 @@ public final class Poller {
                 fail("unexpected failure: " + e, e);
             }
             return new AccountResult(account.name(), startedAt, new Counts(imported, removed, skipped, failed),
-                    errors.isEmpty() ? null : String.join("; ", errors));
+                    errors.isEmpty() ? null : String.join("; ", errors), interrupted);
         }
 
         private void fail(String message, Throwable cause) {
@@ -197,7 +201,6 @@ public final class Poller {
                 changes = source.changes(folderId, null);
             }
             int failedBefore = failed;
-            boolean interrupted = false;
             for (SourceMessage message : changes.messages()) {
                 if (stop.getAsBoolean()) {
                     interrupted = true;
@@ -266,17 +269,17 @@ public final class Poller {
             }
             DestinationConnection destination = connections.get(mapping.destination());
             store.savePending(new Receipt(account.name(), message.id(), State.PENDING, mapping.source(), mapping.destination(),
-                    mapping.folder(), message.internetMessageId(), fingerprint.contentHash(), fingerprint.size(), null,
+                    mapping.destinationFolder(), message.internetMessageId(), fingerprint.contentHash(), fingerprint.size(), null,
                     clock.instant(), null, null, null));
             Date received = message.receivedDateTime() == null ? null : Date.from(message.receivedDateTime().toInstant());
-            OptionalLong uid = destination.append(mapping.folder(), mime, received);
+            OptionalLong uid = destination.append(mapping.destinationFolder(), mime, received);
             // The receipt only says IMPORTED once the server shows the copy, not when it says OK.
             OptionalLong stored = uid.isPresent()
-                    ? (destination.contains(mapping.folder(), uid.getAsLong()) ? uid : OptionalLong.empty())
-                    : destination.find(mapping.folder(), fingerprint);
+                    ? (destination.contains(mapping.destinationFolder(), uid.getAsLong()) ? uid : OptionalLong.empty())
+                    : destination.find(mapping.destinationFolder(), fingerprint);
             if (stored.isEmpty()) {
                 throw new DestinationException("destination " + mapping.destination() + " accepted the upload but the message is not in "
-                        + mapping.folder(), null);
+                        + mapping.destinationFolder(), null);
             }
             store.markImported(account.name(), message.id(), stored.getAsLong(), clock.instant());
             imported++;
@@ -293,14 +296,22 @@ public final class Poller {
                         + " copying it again", account.name(), pending.messageId(), pending.destination());
                 return false;
             }
-            OptionalLong found = connections.get(pending.destination())
-                    .find(pending.destinationFolder(), current.withContent(pending.contentHash(), pending.sizeBytes()));
+            OptionalLong found;
+            try {
+                found = connections.get(pending.destination())
+                        .find(pending.destinationFolder(), current.withContent(pending.contentHash(), pending.sizeBytes()));
+            } catch (DestinationUnavailableException e) {
+                // Only this message depends on that destination; the folder's own one may be fine.
+                connections.drop(e.destination());
+                throw new DestinationException("cannot check " + e.destination() + " for an earlier upload: "
+                        + e.getMessage(), e);
+            }
             found.ifPresent(uid -> store.markImported(account.name(), pending.messageId(), uid, clock.instant()));
             return found.isPresent();
         }
 
         private String describe(String action, FolderMapping mapping, SourceMessage message) {
-            return account.name() + " " + mapping.source() + " -> " + mapping.destination() + "/" + mapping.folder() + ": "
+            return account.name() + " " + mapping.source() + " -> " + mapping.destination() + "/" + mapping.destinationFolder() + ": "
                     + action + " message received " + message.receivedDateTime()
                     + (message.internetMessageId() == null ? "" : " " + message.internetMessageId());
         }

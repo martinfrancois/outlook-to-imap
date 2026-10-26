@@ -5,6 +5,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.containing;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -133,6 +134,9 @@ class PollServiceTest {
         assertThat(fastmail.messages("Outlook Junk")).hasSize(1);
         assertThat(store.receipt("hotmail", "m2")).isEmpty();
         assertThat(store.acquireLease("third-host/1", clock.instant(), clock.instant().plusSeconds(900))).isFalse();
+        // A cut-short poll is neither a success nor a failure for the monitoring.
+        assertThat(report.get().interrupted()).isTrue();
+        healthchecks.verify(0, postRequestedFor(urlPathMatching("/ping.*")));
     }
 
     @Test

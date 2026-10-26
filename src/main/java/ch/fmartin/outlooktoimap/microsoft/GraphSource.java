@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -58,10 +59,14 @@ public final class GraphSource {
     private static final String[] FOLDER_FIELDS = {"id", "displayName"};
     private static final String[] DELTA_FIELDS = {"id", "internetMessageId", "receivedDateTime"};
 
+    // Retries per request after a throttling or server error; each waits for Retry-After, or backs
+    // off exponentially up to RetryHandlerOption.MAX_DELAY seconds.
+    static final int MAX_RETRIES = 5;
+
     private final GraphServiceClient client;
 
     public GraphSource(Supplier<String> accessToken) {
-        this(accessToken, DEFAULT_BASE_URL, new RetryHandlerOption(null, 5, RetryHandlerOption.DEFAULT_DELAY));
+        this(accessToken, DEFAULT_BASE_URL, new RetryHandlerOption(null, MAX_RETRIES, RetryHandlerOption.DEFAULT_DELAY));
     }
 
     /** Lets tests point the client at a local server and shorten the retry delays. */
@@ -80,11 +85,21 @@ public final class GraphSource {
                 return hosts;
             }
         };
-        OkHttpClient http = GraphClientFactory.create(new RequestOption[] {retry})
-                .addInterceptor(chain -> chain.proceed(chain.request().newBuilder().addHeader("Prefer", IMMUTABLE_IDS).build()))
-                .build();
-        this.client = new GraphServiceClient(new BaseBearerTokenAuthenticationProvider(tokens), http);
+        this.client = new GraphServiceClient(new BaseBearerTokenAuthenticationProvider(tokens), httpClient(retry));
         this.client.getRequestAdapter().setBaseUrl(baseUrl);
+    }
+
+    /**
+     * The SDK's client with its retry handler, plus the immutable-id header. Its overall call
+     * timeout of 100 seconds would also cover the retry handler's waits, which honour Retry-After
+     * and can add up to several minutes, so it is lifted; the per-attempt connect and read
+     * timeouts stay.
+     */
+    static OkHttpClient httpClient(RetryHandlerOption retry) {
+        return GraphClientFactory.create(new RequestOption[] {retry})
+                .addInterceptor(chain -> chain.proceed(chain.request().newBuilder().addHeader("Prefer", IMMUTABLE_IDS).build()))
+                .callTimeout(Duration.ZERO)
+                .build();
     }
 
     /** A message as delta reports it, without its content. */
@@ -243,7 +258,7 @@ public final class GraphSource {
         }
     }
 
-    /** The message no longer exists in the mailbox. */
+    /** The message no longer exists in the source account. */
     public static final class MessageGoneException extends GraphException {
         MessageGoneException(Throwable cause) {
             super("message no longer exists", cause);
@@ -253,7 +268,7 @@ public final class GraphSource {
     /** Graph kept throttling after the SDK's retries ran out. */
     public static final class ThrottledException extends GraphException {
         ThrottledException(int status, Throwable cause) {
-            super("Microsoft throttled the mailbox or was unavailable (HTTP " + status + ") after every retry;"
+            super("Microsoft throttled this account or was unavailable (HTTP " + status + ") after every retry;"
                     + " trying again next poll", cause);
         }
     }

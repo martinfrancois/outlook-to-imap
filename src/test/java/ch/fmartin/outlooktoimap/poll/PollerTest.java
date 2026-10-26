@@ -431,6 +431,39 @@ class PollerTest {
 
         assertThat(report.accounts().getFirst().counts().imported()).isEqualTo(1);
         assertThat(store.checkpoint("hotmail", "junkemail")).isEmpty();
+        // Cut short is not a success, even with nothing failed.
+        assertThat(report.interrupted()).isTrue();
+        assertThat(report.succeeded()).isFalse();
+        assertThat(store.statuses().getFirst().lastSuccessAt()).isNull();
+    }
+
+    @Test
+    void anEarlierUploadsDestinationBeingDownFailsOnlyThatMessage() {
+        open(Engine.SQLITE);
+        stubOne("m1");
+        poll(config(account("hotmail", false)), d -> new FailingAfterAppend(fastmail.connect(d)));
+        graph.mime("m2", TestMessages.mime("m2"));
+        graph.deltaRound("junkemail", null, "t2", List.of(List.of(Item.of("m1"), Item.of("m2"))));
+        try (FakeImap dovecot = new FakeImap()) {
+            Account moved = new Account("hotmail", "hotmail@hotmail.test", "app", "consumers",
+                    List.of(new FolderMapping("junkemail", "dovecot", JUNK, false)));
+            Map<String, Destination> destinations = new LinkedHashMap<>();
+            destinations.put("fastmail", fastmail.destination("fastmail", directory));
+            destinations.put("dovecot", dovecot.destination("dovecot", directory));
+            Config config = new Config(new Microsoft("app", "consumers"), directory, database, Duration.ofHours(1),
+                    new Monitoring(0, null), destinations, List.of(moved));
+
+            PollReport report = poll(config, d -> {
+                if (d.name().equals("fastmail")) {
+                    throw new DestinationUnavailableException("fastmail", new java.io.IOException("connection refused"));
+                }
+                return dovecot.connect(d);
+            });
+
+            assertThat(report.accounts().getFirst().counts()).isEqualTo(new Counts(1, 0, 0, 1));
+            assertThat(dovecot.messages(JUNK)).hasSize(1);
+            assertThat(store.receipt("hotmail", "m1").get().state()).isEqualTo(State.PENDING);
+        }
     }
 
     private void stubOne(String id) {

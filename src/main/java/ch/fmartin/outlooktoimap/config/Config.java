@@ -67,5 +67,6 @@ public record Config(
         }
     }
 
-    public record FolderMapping(String source, String destination, String folder, boolean removeSourceAfterSync) {}
+    /** {@code destinationFolder} is the YAML key {@code folder}. */
+    public record FolderMapping(String source, String destination, String destinationFolder, boolean removeSourceAfterSync) {}
 }
