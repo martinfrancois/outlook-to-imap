@@ -97,6 +97,7 @@ public final class Store implements AutoCloseable {
             newSqliteFile = Optional.empty();
             hikari.setMaximumPoolSize(4);
             // Without it the driver falls back to plain text and never checks the certificate.
+            // docs/adr/0020-verified-postgresql-tls-and-loopback-health-by-default.md
             if (!choosesTls(database.url())) {
                 hikari.addDataSourceProperty(PGProperty.SSL_MODE.getName(), "verify-full");
             }
