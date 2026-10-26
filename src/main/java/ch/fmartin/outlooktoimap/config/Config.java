@@ -43,6 +43,7 @@ public record Config(
     public record Monitoring(int healthPort, String healthBindAddress, String heartbeatUrl) {
         public static final int DEFAULT_HEALTH_PORT = 8080;
         // /health has no authentication, so only the host itself reaches it unless the owner opens it.
+        // docs/adr/0020-verified-postgresql-tls-and-loopback-health-by-default.md
         public static final String DEFAULT_HEALTH_BIND_ADDRESS = "127.0.0.1";
 
         /** The address /health listens on, with a host name looked up. */
