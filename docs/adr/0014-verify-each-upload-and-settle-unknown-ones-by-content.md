@@ -177,3 +177,17 @@ service where IMAP traffic isn't inspected, keep the fingerprint strict, and doc
 the README section "Reliability". On such a machine normal copying still works, because UIDPLUS
 verifies each copy by UID; only the recovery of an unknown upload fails, leaving at most one
 duplicate per crash.
+
+The search for a `Message-ID` or `Date` uses only part of a folded header. Angus Mail returns a
+folded value with its line break. A probe on 2026-10-26, during
+[outlook-to-imap pull request #31](https://github.com/martinfrancois/outlook-to-imap/pull/31),
+stored a message whose `Message-ID` was folded over two lines and searched for it with
+`UID SEARCH HEADER Message-ID` and four values. Dovecot 2.3.21 found the message by the unfolded
+value, with the line break removed and the space kept, and by either half, but not by the folded
+value. GreenMail 2.1.14 found it by the folded value and by either half, but not by the unfolded
+value. Only a part without the line break matches on both, so `Fingerprint.searchable` searches for
+the longest such part. `SEARCH HEADER` matches substrings, so a part can return more candidates than
+the whole value would. The hash and size still decide, so the extra candidates cost only a few more
+reads. `ImapDestinationTest.findsAMessageWhoseMessageIdIsFoldedOverTwoLines` checks that the search
+string holds no line break and that GreenMail finds the message. No automated test runs against
+Dovecot.
