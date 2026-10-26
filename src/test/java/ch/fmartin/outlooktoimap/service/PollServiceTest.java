@@ -25,14 +25,19 @@ import ch.fmartin.outlooktoimap.imap.DestinationConnection;
 import ch.fmartin.outlooktoimap.imap.Fingerprint;
 import ch.fmartin.outlooktoimap.microsoft.AccessTokens;
 import ch.fmartin.outlooktoimap.microsoft.ReauthorizationRequiredException;
+import ch.fmartin.outlooktoimap.store.Counts;
 import ch.fmartin.outlooktoimap.store.Store;
+import ch.fmartin.outlooktoimap.store.Store.AccountStatus;
 import ch.fmartin.outlooktoimap.poll.PollReport;
 import ch.fmartin.outlooktoimap.poll.Poller;
 import com.github.tomakehurst.wiremock.WireMockServer;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -46,6 +51,8 @@ import java.util.OptionalLong;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -252,6 +259,67 @@ class PollServiceTest {
 
             assertThat(response.statusCode()).isEqualTo(503);
             assertThat(response.body()).contains("\"status\":\"down\"").contains("\"error\":");
+        }
+    }
+
+    @Test
+    void aHalfSentRequestDoesNotKeepTheHealthEndpointFromAnsweringOthers() throws Exception {
+        try (HealthServer health = new HealthServer(config.monitoring().healthAddress(), service(a -> "token"), store);
+                Socket slow = new Socket("127.0.0.1", health.port())) {
+            slow.getOutputStream().write("GET /hea".getBytes(StandardCharsets.US_ASCII));
+            slow.getOutputStream().flush();
+
+            HttpResponse<String> response = HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + health.port() + "/health"))
+                            .timeout(Duration.ofSeconds(5))
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertThat(response.statusCode()).isEqualTo(503);
+        }
+    }
+
+    @Test
+    void theHealthEndpointClosesAConnectionThatStallsMidRequest() throws Exception {
+        Duration limit = Duration.ofSeconds(HealthServer.CLIENT_TIMEOUT_SECONDS + 5);
+        try (HealthServer health = new HealthServer(config.monitoring().healthAddress(), service(a -> "token"), store);
+                Socket slow = new Socket("127.0.0.1", health.port())) {
+            slow.getOutputStream().write("GET /hea".getBytes(StandardCharsets.US_ASCII));
+            slow.getOutputStream().flush();
+            slow.setSoTimeout((int) limit.toMillis());
+            long start = System.nanoTime();
+
+            // -1 means the server closed the connection; a read timeout would fail the test instead.
+            assertThat(slow.getInputStream().read()).isEqualTo(-1);
+            assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(limit);
+        }
+    }
+
+    @Test
+    void theHealthEndpointClosesAConnectionThatStopsReadingTheReply() throws Exception {
+        // JSON writes each control character as six bytes, so the reply is about 12 MB: more than
+        // the socket buffers of both ends hold, and the server blocks while it writes.
+        String error = "\u0001".repeat(2000);
+        for (int i = 0; i < 1000; i++) {
+            store.saveStatus(new AccountStatus("account-" + i, clock.instant(), null, new Counts(0, 0, 0, 1), error));
+        }
+        try (HealthServer health = new HealthServer(config.monitoring().healthAddress(), service(a -> "token"), store);
+                Socket slow = new Socket()) {
+            slow.setReceiveBufferSize(4096);
+            slow.connect(new InetSocketAddress("127.0.0.1", health.port()));
+            slow.getOutputStream().write("GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+            slow.getOutputStream().flush();
+            Thread.sleep(Duration.ofSeconds(HealthServer.CLIENT_TIMEOUT_SECONDS + 3));
+
+            // A server that kept the connection would finish the reply and then wait for the next
+            // request, so the read would time out instead of reaching the end of the stream.
+            slow.setSoTimeout(5_000);
+            String reply = new String(slow.getInputStream().readAllBytes(), StandardCharsets.ISO_8859_1);
+
+            int bodyStart = reply.indexOf("\r\n\r\n") + 4;
+            Matcher length = Pattern.compile("(?im)^content-length: *(\\d+)").matcher(reply.substring(0, bodyStart));
+            assertThat(length.find()).isTrue();
+            assertThat(reply.length() - bodyStart).isLessThan(Integer.parseInt(length.group(1)));
         }
     }
 
