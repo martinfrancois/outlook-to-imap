@@ -17,6 +17,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Signs Microsoft accounts in with the device code flow and hands out access tokens afterwards.
@@ -33,6 +34,7 @@ public final class MicrosoftLogin implements AccessTokens {
     private final Path tokenDirectory;
     private final String authorityHost;
     private final IHttpClient httpClient;
+    private final Function<Path, TokenCacheFile> newCacheFile;
     private final Map<String, Client> clients = new ConcurrentHashMap<>();
 
     public MicrosoftLogin(Path stateDirectory) {
@@ -41,15 +43,22 @@ public final class MicrosoftLogin implements AccessTokens {
 
     /** Lets tests point MSAL at a local server instead of Microsoft. */
     public MicrosoftLogin(Path stateDirectory, String authorityHost, IHttpClient httpClient) {
+        this(stateDirectory, authorityHost, httpClient, TokenCacheFile::new);
+    }
+
+    /** Lets tests make writing the token cache fail. */
+    MicrosoftLogin(Path stateDirectory, String authorityHost, IHttpClient httpClient, Function<Path, TokenCacheFile> newCacheFile) {
         this.tokenDirectory = stateDirectory.resolve("tokens");
         this.authorityHost = authorityHost;
         this.httpClient = httpClient;
+        this.newCacheFile = newCacheFile;
     }
 
     /**
      * Runs the device code flow: {@code instructions} receives Microsoft's "go to this page and
      * enter this code" text, and the call returns once the user finished on another device.
-     * Signing in to a different Microsoft account than the configured one fails and saves nothing.
+     * Signing in to a different Microsoft account than the configured one fails, and its login is
+     * removed from the token file again.
      */
     public void authorize(Account account, Consumer<String> instructions) {
         Client client = client(account);
@@ -65,9 +74,15 @@ public final class MicrosoftLogin implements AccessTokens {
         }
         String signedIn = result.account().username();
         if (signedIn == null || !signedIn.equalsIgnoreCase(account.email())) {
-            client.app().removeAccount(result.account()).join();
-            throw new MicrosoftLoginException("signed in as " + signedIn + " but account " + account.name()
-                    + " is configured for " + account.email() + "; that login was not kept", null);
+            String refused = "signed in as " + signedIn + " but account " + account.name() + " is configured for " + account.email();
+            try {
+                client.app().removeAccount(result.account()).join();
+            } catch (CompletionException e) {
+                // MSAL saved the login before the check; accessToken never uses it, but it stays on disk.
+                throw new MicrosoftLoginException(refused + ", and removing that login failed: " + e.getCause().getMessage()
+                        + "; delete " + client.cache().file() + " by hand", e.getCause());
+            }
+            throw new MicrosoftLoginException(refused + "; that login was not kept", null);
         }
     }
 
@@ -122,7 +137,7 @@ public final class MicrosoftLogin implements AccessTokens {
     }
 
     private Client newClient(String name, Account account) {
-        TokenCacheFile cache = new TokenCacheFile(tokenDirectory.resolve(name + ".json"));
+        TokenCacheFile cache = newCacheFile.apply(tokenDirectory.resolve(name + ".json"));
         try {
             PublicClientApplication.Builder builder = PublicClientApplication.builder(account.clientId())
                     .authority(authorityHost + account.tenant() + "/")

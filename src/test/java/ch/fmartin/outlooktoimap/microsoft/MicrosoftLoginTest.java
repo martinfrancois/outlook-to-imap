@@ -17,6 +17,9 @@ import com.microsoft.aad.msal4j.HttpRequest;
 import com.microsoft.aad.msal4j.HttpResponse;
 import com.microsoft.aad.msal4j.IHttpClient;
 import com.microsoft.aad.msal4j.IHttpResponse;
+import com.microsoft.aad.msal4j.ITokenCacheAccessContext;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -98,6 +101,20 @@ class MicrosoftLoginTest {
                 .hasMessageContaining("someone.else@hotmail.test");
         assertThat(Files.readString(state.resolve("tokens/hotmail.json"))).doesNotContain("refresh-1");
         assertThatThrownBy(() -> login().accessToken(account(false))).isInstanceOf(ReauthorizationRequiredException.class);
+    }
+
+    @Test
+    void aForeignLoginThatCannotBeRemovedSaysWhichFileToDelete() {
+        stubDeviceCode();
+        stubToken("device_code", "someone.else@hotmail.test", "access-1", "refresh-1");
+        // MSAL saves the foreign login, then removing it needs a second write, which fails here.
+        MicrosoftLogin login = new MicrosoftLogin(state, FAKE_AUTHORITY_HOST, new LocalHttpClient(server.baseUrl()),
+                FailingSecondWrite::new);
+
+        assertThatThrownBy(() -> login.authorize(account(false), line -> {}))
+                .isInstanceOf(MicrosoftLoginException.class)
+                .hasMessageContaining("someone.else@hotmail.test")
+                .hasMessageContaining("delete " + state.resolve("tokens/hotmail.json") + " by hand");
     }
 
     @Test
@@ -229,6 +246,23 @@ class MicrosoftLoginTest {
     private static com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder json(int status, Map<String, Object> body) {
         return aResponse().withStatus(status).withHeader("Content-Type", "application/json")
                 .withBody(tools.jackson.databind.json.JsonMapper.builder().build().writeValueAsString(body));
+    }
+
+    /** A token cache whose second write fails, as on a full disk. */
+    private static final class FailingSecondWrite extends TokenCacheFile {
+        private int writes;
+
+        FailingSecondWrite(Path file) {
+            super(file);
+        }
+
+        @Override
+        public void afterCacheAccess(ITokenCacheAccessContext context) {
+            if (context.hasCacheChanged() && ++writes == 2) {
+                throw new UncheckedIOException(new IOException("No space left on device"));
+            }
+            super.afterCacheAccess(context);
+        }
     }
 
     /** Sends MSAL's https://login.test requests to the local WireMock server instead. */

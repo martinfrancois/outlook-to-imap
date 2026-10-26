@@ -17,7 +17,8 @@ import java.nio.file.attribute.PosixFilePermissions;
  * out a new refresh token, so the file is rewritten after each change; the rename makes a crash
  * leave either the old file or the new one, never half of one.
  */
-final class TokenCacheFile implements ITokenCacheAccessAspect {
+// Not final, so a test can make a write fail through a subclass.
+class TokenCacheFile implements ITokenCacheAccessAspect {
 
     private static final boolean POSIX = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
 
@@ -25,6 +26,10 @@ final class TokenCacheFile implements ITokenCacheAccessAspect {
 
     TokenCacheFile(Path file) {
         this.file = file;
+    }
+
+    Path file() {
+        return file;
     }
 
     boolean exists() {
