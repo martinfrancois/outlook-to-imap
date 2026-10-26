@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "maven",
+  "include-v-in-tag": true,
+  "include-component-in-tag": false,
+  "skip-snapshot": true,
+  "draft": true,
+  "force-tag-creation": true,
+  "packages": {
+    ".": {
+      "component": "outlook-to-imap",
+      "package-name": "outlook-to-imap",
+      "changelog-path": "CHANGELOG.md",
+      "initial-version": "1.0.0"
+    }
+  }
+}

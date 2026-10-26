@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The Java versions to test come from endoflife.date, so a new LTS joins the matrix on the day
+  # it ships without a change here. Only LTS releases from 21 upward count: 21 is
+  # maven.compiler.release in pom.xml and the minimum the README promises.
+  lts:
+    name: lts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      versions: ${{ steps.pick.outputs.versions }}
+    steps:
+      - name: List current Java LTS versions from 21 upward
+        id: pick
+        run: |
+          fallback='["21","25"]'
+          versions=$(curl -fsS --max-time 20 https://endoflife.date/api/eclipse-temurin.json \
+            | jq -c '[.[] | select(.lts != false) | .cycle | select((tonumber? // 0) >= 21)] | sort_by(tonumber)') \
+            || versions=''
+          if [ -z "$versions" ] || [ "$versions" = '[]' ]; then
+            echo "::warning::endoflife.date gave no usable answer, testing the committed list $fallback instead"
+            versions=$fallback
+          fi
+          echo "Testing Java $versions"
+          echo "versions=$versions" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: test (Java ${{ matrix.java }})
+    needs: lts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # Every leg reports on its own; cancelling the rest after one failure would hide which
+      # Java versions still work.
+      fail-fast: false
+      matrix:
+        java: ${{ fromJSON(needs.lts.outputs.versions) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Java ${{ matrix.java }}
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      # Runs the tests against SQLite and, through Testcontainers and the runner's Docker,
+      # PostgreSQL, then enforces the coverage gate.
+      - name: Verify
+        run: mvn -B verify
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-java-${{ matrix.java }}
+          if-no-files-found: ignore
+          path: target/site/jacoco
+
+  image:
+    name: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the image and run it
+        run: scripts/smoke-image.sh docker outlook-to-imap:ci
+
+  # The ruleset on main requires a status check named exactly "build". The matrix legs are named
+  # "test (Java 21)" and so on and change with every new LTS, so this job carries their result,
+  # and the image check's, into one stable name.
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    needs: [lts, test, image]
+    # Without always() this job is skipped when a leg fails, and a skipped required check does
+    # not block a merge.
+    if: always()
+    steps:
+      - name: Require every job to have passed
+        env:
+          LTS: ${{ needs.lts.result }}
+          TEST: ${{ needs.test.result }}
+          IMAGE: ${{ needs.image.result }}
+        run: |
+          echo "lts: ${LTS}, test: ${TEST}, image: ${IMAGE}"
+          if [ "${LTS}" != "success" ] || [ "${TEST}" != "success" ] || [ "${IMAGE}" != "success" ]; then
+            echo "::error::A required job did not pass."
+            exit 1
+          fi
