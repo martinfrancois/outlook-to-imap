@@ -23,6 +23,7 @@ import ch.fmartin.outlooktoimap.imap.DestinationConnection;
 import ch.fmartin.outlooktoimap.imap.Fingerprint;
 import ch.fmartin.outlooktoimap.imap.ImapDestination.DestinationUnavailableException;
 import ch.fmartin.outlooktoimap.microsoft.AccessTokens;
+import ch.fmartin.outlooktoimap.microsoft.MicrosoftLoginException;
 import ch.fmartin.outlooktoimap.microsoft.ReauthorizationRequiredException;
 import ch.fmartin.outlooktoimap.store.Counts;
 import ch.fmartin.outlooktoimap.store.Store;
@@ -40,6 +41,7 @@ import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -72,7 +74,7 @@ class PollerTest {
         fastmail.close();
     }
 
-    static java.util.stream.Stream<Engine> engines() {
+    static Stream<Engine> engines() {
         return Databases.engines();
     }
 
@@ -314,6 +316,23 @@ class PollerTest {
     }
 
     @Test
+    void aDownloadThatBreaksOffFailsOnlyThatMessage() {
+        open(Engine.SQLITE);
+        List<Item> items = List.of(Item.of("good1"), Item.of("broken"), Item.of("good2"));
+        items.forEach(i -> graph.mime(i.id(), TestMessages.mime(i.id())));
+        graph.mimeBreaksOff("broken");
+        graph.deltaRound("junkemail", null, "t1", List.of(items));
+
+        AccountResult result = poll(config(account("hotmail", false))).accounts().getFirst();
+
+        assertThat(result.counts().imported()).isEqualTo(2);
+        assertThat(result.counts().failed()).isEqualTo(1);
+        assertThat(result.error()).startsWith("junkemail: message broken: ");
+        assertThat(fastmail.messages(JUNK)).hasSize(2);
+        assertThat(store.checkpoint("hotmail", "junkemail")).isEmpty();
+    }
+
+    @Test
     void anAccountThatNeedsANewLoginDoesNotStopTheOtherAccount() {
         open(Engine.SQLITE);
         stubOne("m1");
@@ -334,6 +353,28 @@ class PollerTest {
         assertThat(report.accounts().get(1).counts().imported()).isEqualTo(1);
         assertThat(store.statuses()).extracting(Store.AccountStatus::account).containsExactly("hotmail", "live");
         assertThat(store.statuses().get(1).lastSuccessAt()).isNull();
+    }
+
+    static Stream<RuntimeException> loginFailures() {
+        return Stream.of(
+                new ReauthorizationRequiredException("hotmail", "Microsoft refused the saved login", null),
+                new MicrosoftLoginException("the Microsoft login service did not answer", null));
+    }
+
+    @ParameterizedTest
+    @MethodSource("loginFailures")
+    void aLoginThatFailsDuringADownloadEndsTheAccountInsteadOfFailingEachMessage(RuntimeException loginFailure) {
+        open(Engine.SQLITE);
+        List<Item> items = List.of(Item.of("m1"), Item.of("m2"));
+        items.forEach(i -> graph.mime(i.id(), TestMessages.mime(i.id())));
+        graph.deltaRound("junkemail", null, "t1", List.of(items));
+
+        AccountResult result = poll(config(account("hotmail", false)), a -> tokenUntilAFolderIsListed(loginFailure), null)
+                .accounts().getFirst();
+
+        assertThat(result.error()).contains(loginFailure.getMessage()).doesNotContain("message m1");
+        assertThat(result.counts().failed()).isEqualTo(1);
+        assertThat(store.checkpoint("hotmail", "junkemail")).isEmpty();
     }
 
     @Test
@@ -471,6 +512,14 @@ class PollerTest {
         graph.deltaRound("junkemail", null, "t1", List.of(List.of(Item.of(id))));
     }
 
+    /** A token for every request until a delta listing was served, then {@code failure}. */
+    private String tokenUntilAFolderIsListed(RuntimeException failure) {
+        if (graph.server.findAll(getRequestedFor(urlPathMatching(".*/messages/delta\\(\\)"))).isEmpty()) {
+            return "token";
+        }
+        throw failure;
+    }
+
     private void open(Engine engine) {
         database = Databases.fresh(engine, directory);
         store = Store.open(database);
@@ -504,7 +553,7 @@ class PollerTest {
     }
 
     private Poller poller(Config config, AccessTokens tokens, Function<Destination, DestinationConnection> destinations) {
-        return new Poller(config, store, tokens, a -> graph.source(),
+        return new Poller(config, store, tokens, a -> graph.source(() -> tokens.accessToken(a)),
                 destinations != null ? destinations : fastmail::connect, Clock.systemUTC());
     }
 

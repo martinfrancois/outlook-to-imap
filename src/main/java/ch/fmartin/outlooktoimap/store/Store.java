@@ -52,6 +52,10 @@ public final class Store implements AutoCloseable {
 
     // Keeps a pathological error message from bloating the database; the columns are TEXT.
     private static final int MAX_ERROR_LENGTH = 2000;
+    // The length of receipt.internet_message_id, VARCHAR(2000) in the released migration
+    // V1__receipts_checkpoints_status.sql. The column is for people reading the database; nothing
+    // matches on it, so a sender's over-long Message-ID is cut instead of refused.
+    static final int MAX_MESSAGE_ID_LENGTH = 2000;
 
     private final HikariDataSource dataSource;
     private final Jdbi jdbi;
@@ -126,7 +130,7 @@ public final class Store implements AutoCloseable {
                 .bind("source", receipt.sourceFolder())
                 .bind("destination", receipt.destination())
                 .bind("folder", receipt.destinationFolder())
-                .bind("imid", receipt.internetMessageId())
+                .bind("imid", truncate(receipt.internetMessageId(), MAX_MESSAGE_ID_LENGTH))
                 .bind("hash", receipt.contentHash())
                 .bind("size", receipt.sizeBytes())
                 .bind("now", receipt.createdAt().toEpochMilli())
@@ -156,7 +160,7 @@ public final class Store implements AutoCloseable {
         jdbi.useHandle(h -> h.createUpdate("UPDATE receipt SET last_error = :error WHERE account = :account AND message_id = :id")
                 .bind("account", account)
                 .bind("id", messageId)
-                .bind("error", truncate(error))
+                .bind("error", truncate(error, MAX_ERROR_LENGTH))
                 .execute());
     }
 
@@ -202,7 +206,7 @@ public final class Store implements AutoCloseable {
                 .bind("removed", status.counts().removed())
                 .bind("skipped", status.counts().skipped())
                 .bind("failed", status.counts().failed())
-                .bind("error", truncate(status.lastError()))
+                .bind("error", truncate(status.lastError(), MAX_ERROR_LENGTH))
                 .execute());
     }
 
@@ -278,7 +282,7 @@ public final class Store implements AutoCloseable {
         return rs.wasNull() ? null : Instant.ofEpochMilli(millis);
     }
 
-    private static String truncate(String error) {
-        return error == null || error.length() <= MAX_ERROR_LENGTH ? error : error.substring(0, MAX_ERROR_LENGTH);
+    private static String truncate(String value, int maxLength) {
+        return value == null || value.length() <= maxLength ? value : value.substring(0, maxLength);
     }
 }

@@ -12,6 +12,7 @@ import ch.fmartin.outlooktoimap.microsoft.GraphSource;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.MappingBuilder;
 import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
+import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.matching.RequestPatternBuilder;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import com.microsoft.kiota.http.middleware.options.RetryHandlerOption;
@@ -113,6 +114,13 @@ public final class FakeGraph implements AutoCloseable {
         server.stubFor(get(urlPathEqualTo("/v1.0/me/messages/" + id + "/$value"))
                 .atPriority(1)
                 .willReturn(error(status, "ErrorInternalServerError")));
+    }
+
+    /** The download of {@code id} starts, then the connection breaks off in the middle of the body. */
+    public void mimeBreaksOff(String id) {
+        server.stubFor(get(urlPathEqualTo("/v1.0/me/messages/" + id + "/$value"))
+                .atPriority(1)
+                .willReturn(aResponse().withFault(Fault.MALFORMED_RESPONSE_CHUNK)));
     }
 
     public void moveSucceeds() {

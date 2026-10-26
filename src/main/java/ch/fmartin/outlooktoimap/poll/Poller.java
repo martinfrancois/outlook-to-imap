@@ -17,6 +17,7 @@ import ch.fmartin.outlooktoimap.microsoft.GraphSource.MessageGoneException;
 import ch.fmartin.outlooktoimap.microsoft.GraphSource.SourceMessage;
 import ch.fmartin.outlooktoimap.microsoft.GraphSource.ThrottledException;
 import ch.fmartin.outlooktoimap.microsoft.AccessTokens;
+import ch.fmartin.outlooktoimap.microsoft.MicrosoftLoginException;
 import ch.fmartin.outlooktoimap.microsoft.ReauthorizationRequiredException;
 import ch.fmartin.outlooktoimap.store.Store;
 import ch.fmartin.outlooktoimap.store.Counts;
@@ -171,7 +172,7 @@ public final class Poller {
             } catch (ThrottledException e) {
                 fail(e.getMessage(), null);
             } catch (RuntimeException e) {
-                fail("unexpected failure: " + e, e);
+                fail(unexpectedFailure(e), e);
             }
             if (interrupted) {
                 errors.add("poll interrupted before every folder was read");
@@ -213,13 +214,14 @@ public final class Poller {
                     copyMessage(source, mapping, message);
                 } catch (MessageGoneException e) {
                     skipped++;
-                } catch (ThrottledException | DestinationUnavailableException e) {
+                } catch (ThrottledException | DestinationUnavailableException | ReauthorizationRequiredException
+                        | MicrosoftLoginException e) {
                     throw e;
                 } catch (GraphException | DestinationException e) {
-                    fail(mapping.source() + ": message " + message.id() + ": " + e.getMessage(), e);
-                    if (!dryRun) {
-                        store.recordError(account.name(), message.id(), e.getMessage());
-                    }
+                    failMessage(mapping, message, e.getMessage(), e);
+                } catch (RuntimeException e) {
+                    // A download that breaks off or a value the database refuses concerns this message only.
+                    failMessage(mapping, message, unexpectedFailure(e), e);
                 }
                 progress.run();
             }
@@ -228,6 +230,13 @@ public final class Poller {
             if (!dryRun && !interrupted && failed == failedBefore) {
                 store.saveCheckpoint(account.name(), mapping.source(), changes.deltaLink(), mapping.removeSourceAfterSync(),
                         clock.instant());
+            }
+        }
+
+        private void failMessage(FolderMapping mapping, SourceMessage message, String error, RuntimeException cause) {
+            fail(mapping.source() + ": message " + message.id() + ": " + error, cause);
+            if (!dryRun) {
+                store.recordError(account.name(), message.id(), error);
             }
         }
 
@@ -316,5 +325,9 @@ public final class Poller {
                     + action + " message received " + message.receivedDateTime()
                     + (message.internetMessageId() == null ? "" : " " + message.internetMessageId());
         }
+    }
+
+    private static String unexpectedFailure(RuntimeException e) {
+        return "unexpected failure: " + e;
     }
 }
