@@ -1,8 +1,8 @@
 ---
 status: accepted
 date: 2026-10-26
-decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26, "Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
+decision-makers: [implementing coding agent, approved by martinfrancois in the design plan]
+consulted: ["Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -14,7 +14,7 @@ A receipt only stops a second upload if the first one wrote it before the second
 running at the same time over the same database both find no receipt and both upload the same
 message. That can happen inside one process, when a poll runs longer than the interval, and across
 processes, when a manual `once` runs next to the container's `run`, or when a scheduler such as a
-Kubernetes CronJob starts a new run before the last one ended.
+Kubernetes CronJob starts a new process before the last one ended.
 [junkEmailMover issue #66](https://github.com/martinfrancois/junkEmailMover/issues/66) asked to
 poll on startup, then at an interval, and to prevent overlapping runs.
 
@@ -75,7 +75,9 @@ Stopping (`Main`):
 ### Consequences
 
 * Good, because no two processes with the same database ever upload at the same time.
-* Good, because a crashed holder blocks polling for at most 15 minutes.
+* Good, because a crashed holder blocks polling for about 18 minutes at most. Its lease runs out
+  15 minutes (`LEASE`) after its last renewal. A service that finds the lease taken tries again
+  every 3 minutes (`LEASE_RENEWAL`), so it can miss the expiry by up to 3 minutes: 15 plus 3.
 * Good, because `docker stop` during a big backlog leaves no half message, no stuck lease and no
   false success.
 * Bad, because every message costs one more database write for the lease renewal.
@@ -95,7 +97,8 @@ Stopping (`Main`):
 `aStopDuringASinglePollReleasesTheLeaseWhenTheGraceRunsOut` and
 `aStopThatOutlastsItsGraceReleasesTheLeaseForTheNextStart`. For interrupted polls:
 `PollerTest.aStopRequestEndsThePollAtAMessageBoundaryAndKeepsTheCheckpoint` and
-`StoreTest.aFailedPollKeepsTheLastSuccess`. The exit codes are constants in `Main`.
+`StoreTest.aFailedPollKeepsTheLastSuccess`. The exit codes are constants in `Main`. In
+`PollService`, `LEASE` is 15 minutes and `LEASE_RENEWAL` is a fifth of it.
 
 ## Pros and Cons of the Options
 
@@ -140,8 +143,8 @@ The review called the database lease more than the issue strictly asked for, and
 service tests were run 8 times under parallel load to check that the timing-based tests are not
 flaky.
 
-`SHUTDOWN_GRACE` was 60 seconds in the first version and became 25 seconds before the release; the
-session recorded no further reason for the value. The README first said `run` exits 0 after a stop.
+`SHUTDOWN_GRACE` was 60 seconds in the first version and became 25 seconds before the release;
+nobody recorded a reason for the value. The README first said `run` exits 0 after a stop.
 A check with the jar showed 143 after SIGTERM and 130 after Ctrl-C, and
 [outlook-to-imap pull request #12](https://github.com/martinfrancois/outlook-to-imap/pull/12)
 corrected the README instead of changing the code.

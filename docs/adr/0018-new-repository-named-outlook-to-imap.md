@@ -2,7 +2,7 @@
 status: accepted
 date: 2026-10-26
 decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26]
+consulted: [implementing coding agent]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -45,8 +45,9 @@ would be a new image path.
 
 What comes with it:
 
-* The repository is public, under the MIT licence, with the same "Required merge checks" ruleset as
-  junkEmailMover, copied over by hand.
+* The repository is public, under the MIT licence. Its "Required merge checks" ruleset was copied
+  by hand from junkEmailMover; what it enforces is in
+  [ADR 0012](0012-releases-with-release-please-after-a-live-check.md).
 * The README and the repository description say "Not affiliated with Microsoft". The README names
   Outlook, Hotmail and Microsoft 365 as Microsoft's trademarks.
 * The README avoids the word "sync" for what the tool does, because it copies one way and never
@@ -54,8 +55,8 @@ What comes with it:
   issue named it.
 * [junkEmailMover issue #66](https://github.com/martinfrancois/junkEmailMover/issues/66) and
   [junkEmailMover issue #48](https://github.com/martinfrancois/junkEmailMover/issues/48) were closed
-  by hand with a link, since a pull request can't close an issue in another repository. junkEmailMover was archived with the description "Replaced
-  by" and a link to this repository.
+  by hand with a link, since a pull request can't close an issue in another repository.
+  junkEmailMover was archived with the description "Replaced by" and a link to this repository.
 * The README section "Moving from junkEmailMover" tells users to stop the old job, delete its stored
   passwords and revoke its app passwords. Nothing carries over.
 
@@ -127,9 +128,10 @@ in use since 2018, packaged by Debian and Ubuntu), phw198/OutlookGoogleCalendarS
 since 2017) and aluxnimm/outlookcaldavsynchronizer (1,095 stars, since 2015). None was renamed.
 Whether any of them was ever asked privately is unknown.
 
-The owner chose a new repository on 2026-10-26 (answer B, "since a would change it too much"), then
-the name `outlook-to-imap` after asking whether a version without trademark issues existed and
-whether well-known tools with Microsoft names had been asked to rename. The agent's recommendation
+The owner chose a new repository over renaming junkEmailMover in place on 2026-10-26, because the
+rename "would change it too much". The owner then chose the name `outlook-to-imap`, after asking
+whether a version without trademark issues existed and whether well-known tools with Microsoft names
+had been asked to rename. The agent's recommendation
 moved from `outlook-to-imap` to `graph-to-imap` after reading the guidelines, and back after the
 precedent check. junkEmailMover was archived on 2026-10-26 at the owner's request.
 

@@ -2,7 +2,7 @@
 status: accepted
 date: 2026-10-26
 decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26]
+consulted: [implementing coding agent]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -43,10 +43,14 @@ The details:
 
 * `pom.xml` sets `maven.compiler.release` to 21.
 * The `lts` job in `.github/workflows/ci.yml` fetches
-  `https://endoflife.date/api/eclipse-temurin.json`, keeps the LTS cycles from 21 upward and sorts
-  them. When the site gives no usable answer, it warns and falls back to the committed list
-  `["21","25"]`. The `test` job runs `./mvnw -B verify` once per version, with `fail-fast: false` so
-  every version reports on its own.
+  `https://endoflife.date/api/eclipse-temurin.json`, keeps the LTS cycles from 21 upward with the
+  `jq` filter `select((tonumber? // 0) >= 21)` and sorts them. When the site gives no usable
+  answer, it warns and falls back to the committed list `["21","25"]`. The floor of 21 is written in
+  both places, because endoflife.date keeps listing old LTS cycles after their support ends: on
+  2026-10-26 it listed 25, 21, 17, 11 and 8. A pull request that raises `maven.compiler.release`
+  must change the filter and the fallback list in the same pull request.
+* The `test` job runs `./mvnw -B verify` once per version, with `fail-fast: false` so every
+  version reports on its own.
 * In `renovate.json`, a custom manager named `java-minimum` reads `maven.compiler.release` with the
   `endoflife-date` datasource. One package rule allows only LTS versions for it and for `java-jdk`,
   the JDK the release workflow sets up, whose versions look like `25.0.5+8.0.LTS`. Another holds the
@@ -61,6 +65,9 @@ The details:
 
 * Good, because a new LTS joins the matrix on the day endoflife.date lists it.
 * Good, because a failure on one Java version doesn't hide the result of the others.
+* Bad, because Renovate's `java-minimum` pull request changes only `pom.xml`. The person who
+  approves it has to raise the floor in `ci.yml` in the same pull request. Otherwise the matrix
+  keeps a leg for a Java version that can't build the jar any more, and that leg fails.
 * Bad, because CI depends on endoflife.date being reachable. The fallback list keeps CI running when
   it isn't, and the warning says so in the log.
 * Neutral, because the required check stays one job named `build`, whatever the matrix contains
@@ -69,7 +76,9 @@ The details:
 ### Confirmation
 
 Every CI run logs a line "Testing Java [...]" from the `lts` job. On 2026-10-26 the list was
-`["21","25"]`. `pom.xml` has `<maven.compiler.release>21</maven.compiler.release>`. The Dependency
+`["21","25"]`. `pom.xml` has `<maven.compiler.release>21</maven.compiler.release>`, and the `lts`
+job in `.github/workflows/ci.yml` starts at the same version, both in its filter
+`select((tonumber? // 0) >= 21)` and in its fallback list `["21","25"]`. The Dependency
 Dashboard, [outlook-to-imap issue #11](https://github.com/martinfrancois/outlook-to-imap/issues/11),
 lists "java-minimum to v25" under the updates waiting for approval.
 
@@ -82,8 +91,8 @@ test matrix. Renovate watches the minimum separately and asks before raising it.
 
 * Good, because nobody has to remember to add a new LTS.
 * Good, because raising the minimum is a visible, approved change.
-* Bad, because the matrix grows by one leg every two years until old LTS versions leave
-  endoflife.date's list of supported cycles.
+* Bad, because the matrix grows by one leg every two years and never shrinks by itself. Only
+  raising the floor in the workflow, together with `maven.compiler.release`, drops an old version.
 
 ### A fixed matrix of Java versions in the workflow
 

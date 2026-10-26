@@ -1,8 +1,8 @@
 ---
 status: accepted
 date: 2026-10-26
-decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26]
+decision-makers: [implementing coding agent, approved by martinfrancois in the design plan]
+consulted: []
 informed: [Future maintainers and agents working on this repository]
 ---
 

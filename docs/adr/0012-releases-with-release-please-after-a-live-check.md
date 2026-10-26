@@ -2,7 +2,7 @@
 status: accepted
 date: 2026-10-26
 decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26]
+consulted: [implementing coding agent]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -54,10 +54,16 @@ What comes with it:
   `./mvnw -B verify` again, attaches `outlook-to-imap-<version>.jar` and its `.sha256`, checks that
   the jar's `Implementation-Version` equals the version, pushes the multi-arch image, and only then
   publishes the draft.
-* The ruleset on `main` requires one status check named `build`, plus linear history, no force
-  push and no deletion. The `build` job in `ci.yml` depends on every other job and fails unless all
-  of them passed. It runs with `if: always()`, because a skipped required check does not block a
-  merge.
+* The ruleset "Required merge checks" is active on the default branch, `main`. Every change needs a
+  pull request, with 0 approvals and every review thread resolved. Only squash and rebase merges
+  are allowed, and the repository settings turn merge commits off too. The project merges by
+  rebase, as [outlook-to-imap issue #4](https://github.com/martinfrancois/outlook-to-imap/issues/4)
+  says for the release pull request. The ruleset requires linear history and the status check
+  `build`, strict, so a branch must be up to date with `main` before it merges. It blocks deleting
+  `main` and pushes that aren't fast-forwards. Repository admins may always bypass it. Merged
+  branches are deleted.
+* The `build` job in `ci.yml` depends on every other job and fails unless all of them passed. It
+  runs with `if: always()`, because a skipped required check does not block a merge.
 * A pull request that the Actions token opens or updates starts no `pull_request` workflows. So
   after release-please creates or updates its pull request, the release workflow starts `ci.yml` on
   the release branch with `gh workflow run`. Those check runs attach to the branch head and count as
@@ -85,7 +91,10 @@ What comes with it:
 
 ### Confirmation
 
-`gh release view v1.0.0 -R martinfrancois/outlook-to-imap` shows the jar and its checksum. The
+`gh release view v1.0.0 -R martinfrancois/outlook-to-imap` shows the jar and its checksum.
+`gh api repos/martinfrancois/outlook-to-imap/rulesets` lists the ruleset; read its rules with
+`gh api repos/martinfrancois/outlook-to-imap/rulesets/<id>`, and the merge settings with
+`gh api repos/martinfrancois/outlook-to-imap`. On 2026-10-26 they matched the list above. The
 `build` job in `.github/workflows/ci.yml` lists `needs: [lts, test, image]` and `if: always()`. The
 release workflow has the step "Run CI on the release pull request". The Dockerfile, both workflows
 and the README all build with `./mvnw`.
@@ -118,8 +127,9 @@ CI pushes the image tagged `main` and `sha-<commit>` after each merge, with no d
 
 ## More Information
 
-The owner chose release-please on 2026-10-26 (answer C to the second design question) and asked for
-the first real working release to be 1.0.0. The release pull request,
+The owner chose release-please on 2026-10-26 from three options: source only, an image pushed on
+every merge and tagged by commit, or release-please versions for the jar and the image. The owner
+also asked for the first real working release to be 1.0.0. The release pull request,
 [outlook-to-imap pull request #6](https://github.com/martinfrancois/outlook-to-imap/pull/6), was to
 be merged only after the live check, as
 [outlook-to-imap issue #4](https://github.com/martinfrancois/outlook-to-imap/issues/4) recorded.
@@ -132,8 +142,23 @@ handling secrets. Its IMAP readback check is a Python script that was tested aga
 Python 3.8, 3.11 and 3.13; curl was rejected for it, because it printed nothing when a search
 matched more than one message and its fetch marks messages as read. The source removal step was
 made mandatory because it covers the riskiest code path. The check of a login after 90 days moved
-to [outlook-to-imap issue #13](https://github.com/martinfrancois/outlook-to-imap/issues/13). The
-owner reported the live check done on 2026-10-26, and 1.0.0 was published the same day.
+to [outlook-to-imap issue #13](https://github.com/martinfrancois/outlook-to-imap/issues/13).
+
+The live check did not pass as first written. The runbook asked for two personal Microsoft
+accounts, Fastmail and Gmail, and the release gate asked for a report "with every step passed". The
+first report covered one account and Fastmail, under a scope the owner had approved, and said "This
+is not an all-pass release report": source removal, the content check behind local antivirus and a
+second account were still open
+([outlook-to-imap issue #2, first live check report](https://github.com/martinfrancois/outlook-to-imap/issues/2#issuecomment-6419068344)).
+The second report completed source removal on a disposable folder
+([outlook-to-imap issue #2, second live check report](https://github.com/martinfrancois/outlook-to-imap/issues/2#issuecomment-6422709090)).
+The third ran two personal Microsoft accounts under the owner-approved scope "No Gmail", with
+Fastmail as the only destination and no mail sent
+([outlook-to-imap issue #2, third live check report](https://github.com/martinfrancois/outlook-to-imap/issues/2#issuecomment-6423273155)).
+The local antivirus limit stayed open as
+[outlook-to-imap issue #17](https://github.com/martinfrancois/outlook-to-imap/issues/17). The owner
+then reported the live check done, and 1.0.0 was published on 2026-10-26 under that narrower scope.
+No Gmail or other non-Fastmail destination was checked live.
 
 The release CI dispatch came in
 [outlook-to-imap pull request #7](https://github.com/martinfrancois/outlook-to-imap/pull/7).
@@ -146,5 +171,7 @@ approved that setting on 2026-10-26.
 The Maven wrapper came in while clearing CI warnings: Maven on the runner logged `Could not transfer
 metadata ... HTTP Status: 401` for repositories declared inside the Graph SDK's POM and Flyway's
 parent POM. The CI run after the switch had none of those lines, and the wrapper also gave the
-Docker build stage the same Maven as CI. The `build` check name and the ruleset were copied from
-junkEmailMover's "Required merge checks" ruleset, so the owner's habits carry over.
+Docker build stage the same Maven as CI. The warnings came back with Maven 3.10.0, see
+[ADR 0019](0019-resolve-every-dependency-from-maven-central.md). The `build` check name and the
+ruleset were copied by hand from junkEmailMover's "Required merge checks" ruleset, so the owner's
+habits carry over.

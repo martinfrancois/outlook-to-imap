@@ -2,7 +2,7 @@
 status: accepted
 date: 2026-10-26
 decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26, "Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
+consulted: [implementing coding agent, "Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -128,7 +128,7 @@ edited `V1` in place before 1.0.0 shipped it; from 1.0.0 on, migrations are only
 
 During the live check, a diagnostic helper held a SQLite read transaction across network calls and
 delayed a scheduled poll with `SQLITE_BUSY` once. Running the checks one after another fixed it; no
-code changed. The session recorded no reason for the pool sizes of 2 and 4.
+code changed. Nobody recorded a reason for the pool sizes of 2 and 4.
 
 Login tokens are not in the database, see
 [ADR 0008](0008-device-code-sign-in-with-a-private-token-file-per-account.md).

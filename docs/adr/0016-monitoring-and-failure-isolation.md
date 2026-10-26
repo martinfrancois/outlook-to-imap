@@ -1,8 +1,8 @@
 ---
 status: accepted
 date: 2026-10-26
-decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26, "Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
+decision-makers: [implementing coding agent, approved by martinfrancois in the design plan]
+consulted: ["Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -12,8 +12,8 @@ informed: [Future maintainers and agents working on this repository]
 
 The service runs unattended. Several things can go wrong, and they need different responses. A
 stuck process needs a restart. An expired login needs the user to run `authorize`. A throttled
-mailbox or an unreachable IMAP server needs only time. One malformed message needs nothing but a
-retry on the next poll.
+source account or an unreachable destination needs only time. One malformed message needs nothing
+but a retry on the next poll.
 [junkEmailMover issue #66](https://github.com/martinfrancois/junkEmailMover/issues/66) asked for a
 documented monitoring and alerting integration, and to isolate failures so one bad message or
 account does not block the others.

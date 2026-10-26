@@ -57,6 +57,10 @@ How to write one:
   and `informed`; then `Context and Problem Statement`, `Decision Drivers`, `Considered Options`,
   `Decision Outcome` with `Consequences` and `Confirmation`, `Pros and Cons of the Options`, and
   `More Information` when there is more to say.
+- `decision-makers` is `[martinfrancois]` for a choice the owner made. For a choice the coding agent
+  made, write `implementing coding agent`, plus how the owner approved it when the owner did, such
+  as `approved by martinfrancois in the design plan`. `consulted` names only people or parties who
+  gave input, and may be `[]`.
 - Open every option under `Pros and Cons of the Options` with one or two sentences saying what the
   option concretely is, before any Good or Bad bullet.
 - Status is `accepted`, or `superseded by [ADR NNNN](NNNN-short-title.md)` once a later record

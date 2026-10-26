@@ -1,8 +1,8 @@
 ---
 status: accepted
 date: 2026-10-26
-decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26, "Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
+decision-makers: [implementing coding agent, approved by martinfrancois in the design plan]
+consulted: ["Reviewers of [outlook-to-imap pull request #5](https://github.com/martinfrancois/outlook-to-imap/pull/5)"]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -10,7 +10,7 @@ informed: [Future maintainers and agents working on this repository]
 
 ## Context and Problem Statement
 
-Microsoft allows 10,000 Graph requests in 10 minutes per app and mailbox
+Microsoft allows 10,000 Graph requests in 10 minutes per app and source account
 ([Outlook service limits](https://learn.microsoft.com/en-us/graph/throttling-limits#outlook-service-limits)).
 A poll costs one request per 100 messages listed, one per message copied and one per message
 removed. A first poll of a 9,000-message folder with source removal on needs about 18,100
@@ -25,7 +25,7 @@ and for tests that show the service handles it.
 
 * Retry code must come from an established library, not be written by hand
   ([ADR 0005](0005-graph-sdk-despite-its-size.md)).
-* A throttled mailbox must not hold up the other accounts.
+* A throttled source account must not hold up the other accounts.
 * Nothing may be lost or copied twice when a poll gives up on an account; the next poll must carry
   on.
 * The waiting the service promises in the README must match what the library does.
@@ -43,7 +43,8 @@ and for tests that show the service handles it.
 
 Chosen option: "The Graph SDK's retry handler with 5 retries, no overall call timeout, and the
 account skipped until the next poll", because it uses the retry code Microsoft maintains, lets every
-wait the handler starts run to its end, and confines a throttled mailbox to its own account.
+wait the handler starts run to its end, and keeps throttling of one source account from holding up
+the others.
 
 The rules:
 

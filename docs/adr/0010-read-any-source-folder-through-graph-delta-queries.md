@@ -2,7 +2,7 @@
 status: accepted
 date: 2026-10-26
 decision-makers: [martinfrancois]
-consulted: [Claude Code agent session of 2026-10-26]
+consulted: [implementing coding agent]
 informed: [Future maintainers and agents working on this repository]
 ---
 
@@ -18,12 +18,12 @@ own fetch reads only the Inbox. The issue asked for a replacement that reads Jun
 Graph and imports it into an IMAP folder.
 
 During the design, the owner asked whether letting people choose any source folder, not only Junk,
-would add much complexity. The question for this record: how does the service read the source
-mailbox, which folders can it read, and how does it know what is new since the last poll?
+would add much complexity. The question for this record: how does the service read a source
+account, which folders can it read, and how does it know what is new since the last poll?
 
 ## Decision Drivers
 
-* Read-only access to the source mailbox, and nothing ever sent.
+* Read-only access to the source account, and nothing ever sent.
 * A message copied once must never be copied again, even after the user deletes the copy at the
   destination. Tools that compare source and destination on each run can't promise that.
 * A later poll should ask only for what changed, so a big folder costs few requests.
@@ -138,7 +138,7 @@ A mapping for `Inbox` would also copy every folder below it.
 ## More Information
 
 The agent compared existing tools on 2026-10-26 before the owner decided to build a new one. Graph
-based MCP servers and clients, such as outlook-mcp, read Outlook mailboxes but copy nothing to IMAP.
+based MCP servers and clients, such as outlook-mcp, read Outlook mail but copy nothing to IMAP.
 
 The owner asked about any source folder on 2026-10-26, and asked that the README lead with the Junk
 example. The agent answered that the change was small; the per-folder checkpoints and immutable ids
