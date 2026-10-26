@@ -68,7 +68,8 @@ removal) when it signs in.
 
 Microsoft throttles Graph per app and per mailbox, at 10,000 requests in 10 minutes. Every account
 has its own budget, so one registration for all your accounts costs nothing.
-[ADR 0001](docs/adr/0001-each-user-registers-their-own-app.md) has the details.
+[ADR 0001](docs/adr/0001-each-user-registers-their-own-app.md) and
+[ADR 0007](docs/adr/0007-throttled-accounts-wait-for-the-next-poll.md) have the details.
 
 ## Configuration
 
@@ -413,7 +414,7 @@ exactly the bytes being sent.
 
 One limit: if the destination server changes messages as it stores them, the content check can't
 match them. A crash at exactly the moment between storing and answering would then leave a
-duplicate. Fastmail, Gmail and Dovecot store messages unchanged.
+duplicate. In the live check before 1.0.0, Fastmail stored the copies unchanged.
 
 Local mail-scanning software can also change the bytes returned by IMAP. For example, an antivirus
 can add `X-Antivirus` headers to fetched mail even when Fastmail's **Show raw message** view shows
