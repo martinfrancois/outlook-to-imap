@@ -2,15 +2,24 @@ package ch.fmartin.outlooktoimap.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import ch.fmartin.outlooktoimap.config.Config.Security;
+import ch.fmartin.outlooktoimap.files.PrivateFiles;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 class ConfigLoaderTest {
 
@@ -203,6 +212,48 @@ class ConfigLoaderTest {
         assertThatThrownBy(() -> ConfigLoader.load(directory.resolve("nope.yaml")))
                 .isInstanceOf(ConfigException.class)
                 .hasMessageContaining("cannot read");
+    }
+
+    @Test
+    void aPasswordFileOthersCanReadGetsAWarningWithTheCommandThatFixesIt() throws IOException {
+        assumeTrue(PrivateFiles.supported());
+        Path shared = directory.resolve("fastmail-password");
+        Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rw-r--r--"));
+        // A space and a quote, which the command must keep inside one shell word.
+        Path groupReadable = directory.resolve("it's secret");
+        Files.writeString(groupReadable, "secret\n");
+        Files.setPosixFilePermissions(groupReadable, PosixFilePermissions.fromString("rw-r-----"));
+
+        List<String> warnings = warningsWhileLoading(minimal("database:\n  passwordFile: \"it's secret\"\n"));
+
+        assertThat(warnings).containsExactlyInAnyOrder(
+                "destinations.fastmail.passwordFile " + shared + " is readable by other users; run: chmod 600 '" + shared + "'",
+                "database.passwordFile " + groupReadable + " is readable by other users; run: chmod 600 '"
+                        + directory + "/it'\\''s secret'");
+    }
+
+    @Test
+    void aPasswordFileOnlyItsOwnerCanReadGetsNoWarning() throws IOException {
+        assumeTrue(PrivateFiles.supported());
+        Files.setPosixFilePermissions(directory.resolve("fastmail-password"), PosixFilePermissions.fromString("rw-------"));
+
+        assertThat(warningsWhileLoading(minimal(""))).isEmpty();
+    }
+
+    private List<String> warningsWhileLoading(String yaml) throws IOException {
+        Logger logger = (Logger) LoggerFactory.getLogger(ConfigLoader.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            load(yaml);
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream()
+                .filter(event -> event.getLevel() == Level.WARN)
+                .map(ILoggingEvent::getFormattedMessage)
+                .toList();
     }
 
     private String minimal(String extra) {

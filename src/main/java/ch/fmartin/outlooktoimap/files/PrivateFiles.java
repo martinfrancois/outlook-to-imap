@@ -44,6 +44,15 @@ public final class PrivateFiles {
         return Files.createTempFile(directory, prefix, suffix, attributes);
     }
 
+    /** Whether users other than the owner may read the file, through its group or others bits. */
+    public static boolean readableByOthers(Path file) throws IOException {
+        if (!POSIX) {
+            return false;
+        }
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(file);
+        return permissions.contains(PosixFilePermission.GROUP_READ) || permissions.contains(PosixFilePermission.OTHERS_READ);
+    }
+
     /** Gives an existing file mode 600. */
     public static void restrict(Path file) throws IOException {
         if (POSIX) {

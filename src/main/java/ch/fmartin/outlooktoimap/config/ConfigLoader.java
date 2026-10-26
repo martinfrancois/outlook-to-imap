@@ -7,6 +7,7 @@ import ch.fmartin.outlooktoimap.config.Config.FolderMapping;
 import ch.fmartin.outlooktoimap.config.Config.Microsoft;
 import ch.fmartin.outlooktoimap.config.Config.Monitoring;
 import ch.fmartin.outlooktoimap.config.Config.Security;
+import ch.fmartin.outlooktoimap.files.PrivateFiles;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -21,6 +22,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.MapperFeature;
@@ -29,6 +32,8 @@ import tools.jackson.dataformat.yaml.YAMLMapper;
 
 /** Reads the YAML configuration file, applies defaults and reports every problem at once. */
 public final class ConfigLoader {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ConfigLoader.class);
 
     // Account names become token cache file names, so they stay within a safe character set.
     private static final Pattern ACCOUNT_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*");
@@ -244,8 +249,27 @@ public final class ConfigLoader {
             Path p = path(value);
             if (!Files.isRegularFile(p) || !Files.isReadable(p)) {
                 errors.add(where + " " + p + " is not a readable file");
+            } else {
+                warnIfReadableByOthers(where, p);
             }
             return p;
+        }
+
+        // A warning, not an error: Docker swarm mounts secrets with mode 444 and Kubernetes secret
+        // volumes with 644 unless told otherwise, and refusing those would stop such setups.
+        private static void warnIfReadableByOthers(String where, Path file) {
+            try {
+                if (PrivateFiles.readableByOthers(file)) {
+                    LOG.warn("{} {} is readable by other users; run: chmod 600 {}", where, file, shellQuoted(file));
+                }
+            } catch (IOException e) {
+                LOG.debug("cannot read the mode of {}", file, e);
+            }
+        }
+
+        /** The path in single quotes, so a shell takes it as one word whatever it contains. */
+        private static String shellQuoted(Path file) {
+            return "'" + file.toString().replace("'", "'\\''") + "'";
         }
 
         private Path path(String value) {
