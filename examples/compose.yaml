@@ -10,7 +10,9 @@ services:
       - ./config.yaml:/config/config.yaml:ro
       - ./secrets:/config/secrets:ro
       - outlook-to-imap-data:/data
-    # Uncomment to reach /health from the host.
+    # Uncomment to reach /health from the host. That, and any other container that checks /health,
+    # needs monitoring.healthBindAddress: 0.0.0.0 in config.yaml. /health has no authentication,
+    # so keep the published port on 127.0.0.1.
     # ports:
     #   - "127.0.0.1:8080:8080"
 

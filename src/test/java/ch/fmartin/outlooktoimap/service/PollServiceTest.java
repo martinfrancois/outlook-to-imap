@@ -70,7 +70,8 @@ class PollServiceTest {
         healthchecks.stubFor(post(urlPathEqualTo("/ping")).willReturn(aResponse().withStatus(200)));
         healthchecks.stubFor(post(urlPathEqualTo("/ping/fail")).willReturn(aResponse().withStatus(200)));
         store = Store.open(Databases.fresh(Engine.SQLITE, directory));
-        config = new Config(new Microsoft("app", "consumers"), directory, null, Duration.ofHours(1), new Monitoring(0, null),
+        config = new Config(new Microsoft("app", "consumers"), directory, null, Duration.ofHours(1),
+                new Monitoring(0, Monitoring.DEFAULT_HEALTH_BIND_ADDRESS, null),
                 Map.of("fastmail", fastmail.destination("fastmail", directory)),
                 List.of(new Account("hotmail", "me@hotmail.test", "app", "consumers",
                         List.of(new FolderMapping("junkemail", "fastmail", "Outlook Junk", false)))));
@@ -155,7 +156,7 @@ class PollServiceTest {
         assertThat(service.healthy()).isFalse();
 
         service.start();
-        try (HealthServer health = new HealthServer(0, service, store)) {
+        try (HealthServer health = new HealthServer(config.monitoring().healthAddress(), service, store)) {
             waitFor(() -> service.lastFinished() != null);
             HttpResponse<String> response = get(health);
             assertThat(response.statusCode()).isEqualTo(200);
@@ -246,7 +247,7 @@ class PollServiceTest {
         Store closed = Store.open(Databases.fresh(Engine.SQLITE, directory.resolve("closed")));
         closed.close();
 
-        try (HealthServer health = new HealthServer(0, service(a -> "token"), closed)) {
+        try (HealthServer health = new HealthServer(config.monitoring().healthAddress(), service(a -> "token"), closed)) {
             HttpResponse<String> response = get(health);
 
             assertThat(response.statusCode()).isEqualTo(503);

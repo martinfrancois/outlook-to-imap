@@ -46,6 +46,7 @@ class ConfigLoaderTest {
         assertThat(config.stateDirectory()).isEqualTo(directory.resolve("data"));
         assertThat(config.database().url()).isEqualTo("jdbc:sqlite:" + directory.resolve("data/outlook-to-imap.db"));
         assertThat(config.monitoring().healthPort()).isEqualTo(8080);
+        assertThat(config.monitoring().healthBindAddress()).isEqualTo("127.0.0.1");
         assertThat(config.monitoring().heartbeatUrl()).isNull();
         Config.Destination fastmail = config.destinations().get("fastmail");
         assertThat(fastmail.security()).isEqualTo(Security.TLS);
@@ -73,6 +74,7 @@ class ConfigLoaderTest {
                 pollInterval: PT15M
                 monitoring:
                   healthPort: 0
+                  healthBindAddress: 0.0.0.0
                   heartbeatUrl: https://hc-ping.com/uuid
                 destinations:
                   fastmail:
@@ -102,6 +104,7 @@ class ConfigLoaderTest {
         assertThat(config.stateDirectory()).isEqualTo(Path.of("/var/lib/outlook-to-imap"));
         assertThat(config.database().username()).isEqualTo("outlook");
         assertThat(config.monitoring().healthPort()).isZero();
+        assertThat(config.monitoring().healthBindAddress()).isEqualTo("0.0.0.0");
         assertThat(config.destinations().get("dovecot").port()).isEqualTo(143);
         assertThat(config.destinations().get("dovecot").security()).isEqualTo(Security.STARTTLS);
         Config.Account account = config.accounts().getFirst();
@@ -159,6 +162,19 @@ class ConfigLoaderTest {
 
         assertThat(config.stateDirectory()).isEqualTo(Path.of("/data"));
         assertThat(config.database().url()).isEqualTo("jdbc:sqlite:/data/outlook-to-imap.db");
+    }
+
+    @Test
+    void theHealthBindAddressIsAHostNameOrAnIpAddress() throws IOException {
+        for (String host : new String[] {"localhost", "::", "[::1]", "192.168.1.10", "outlook-to-imap.internal"}) {
+            assertThat(load(minimal("monitoring:\n  healthBindAddress: \"" + host + "\"\n")).monitoring().healthBindAddress())
+                    .isEqualTo(host);
+        }
+        for (String bad : new String[] {"", " ", "0.0.0.0:8080", "http://0.0.0.0", "two words"}) {
+            assertThatThrownBy(() -> load(minimal("monitoring:\n  healthBindAddress: \"" + bad + "\"\n")))
+                    .isInstanceOf(ConfigException.class)
+                    .hasMessageContaining("monitoring.healthBindAddress must be a host name or IP address, got \"" + bad + "\"");
+        }
     }
 
     @Test
