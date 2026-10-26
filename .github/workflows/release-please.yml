@@ -29,11 +29,13 @@ jobs:
 
       - name: Run CI on the release pull request
         if: ${{ steps.release.outputs.prs_created == 'true' }}
+        # The pull request arrives as JSON text and is parsed in the script: an expression such as
+        # fromJSON fails the step whenever the output is empty.
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
-        run: gh workflow run ci.yml --ref "$BRANCH"
+          PULL_REQUEST: ${{ steps.release.outputs.pr }}
+        run: gh workflow run ci.yml --ref "$(jq -r '.headBranchName' <<< "$PULL_REQUEST")"
 
       - name: Check out the release tag
         if: ${{ steps.release.outputs.release_created == 'true' }}
