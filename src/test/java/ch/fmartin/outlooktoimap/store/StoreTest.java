@@ -76,6 +76,19 @@ class StoreTest {
 
     @ParameterizedTest
     @MethodSource("engines")
+    void aMessageIdLongerThanItsColumnIsCutInsteadOfRefused(Engine engine) {
+        // A sender controls the Message-ID; PostgreSQL would refuse the receipt and block the folder.
+        String longMessageId = "<" + "x".repeat(3000) + "@spam.example>";
+        try (Store store = Store.open(Databases.fresh(engine, directory))) {
+            store.savePending(new Receipt("hotmail", "m1", State.PENDING, "junkemail", "fastmail", "Outlook Junk",
+                    longMessageId, "a".repeat(64), 1234, null, T0, null, null, null));
+
+            assertThat(store.receipt("hotmail", "m1").get().internetMessageId()).isEqualTo(longMessageId.substring(0, Store.MAX_MESSAGE_ID_LENGTH));
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("engines")
     void checkpointsArePerAccountAndFolder(Engine engine) {
         try (Store store = Store.open(Databases.fresh(engine, directory))) {
             store.saveCheckpoint("hotmail", "junkemail", "link-1", false, T0);
