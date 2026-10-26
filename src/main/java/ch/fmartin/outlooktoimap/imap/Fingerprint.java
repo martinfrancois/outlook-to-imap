@@ -46,7 +46,7 @@ public record Fingerprint(String messageId, String date, String contentHash, lon
         } catch (MessagingException e) {
             // Unparseable headers only cost the narrow search; the content still decides.
         }
-        return new Fingerprint(blankToNull(messageId), blankToNull(date), hash(canonical), canonical.length);
+        return new Fingerprint(searchable(messageId), searchable(date), hash(canonical), canonical.length);
     }
 
     /** The same search headers with another content, such as the one recorded before an upload. */
@@ -62,7 +62,23 @@ public record Fingerprint(String messageId, String date, String contentHash, lon
         }
     }
 
-    private static String blankToNull(String value) {
-        return value == null || value.isBlank() ? null : value.strip();
+    /**
+     * The part of a header value to search for. SEARCH HEADER matches substrings; GreenMail compares
+     * a folded header as stored and Dovecot compares it unfolded, so only a part without the line
+     * break matches on both. The longest such part narrows the search the most.
+     */
+    private static String searchable(String value) {
+        if (value == null) {
+            return null;
+        }
+        // Null when every line is blank, so the search falls back to the next header.
+        String longest = null;
+        for (String line : value.lines().toList()) {
+            String part = line.strip();
+            if (!part.isEmpty() && (longest == null || part.length() > longest.length())) {
+                longest = part;
+            }
+        }
+        return longest;
     }
 }

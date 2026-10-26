@@ -68,6 +68,21 @@ class ImapDestinationTest {
     }
 
     @Test
+    void findsAMessageWhoseMessageIdIsFoldedOverTwoLines() {
+        byte[] mime = TestMessages.mime("<prize-2026-10-01-0800-0000-claim-now\r\n .winner@spam.example>", "folded",
+                "Wed, 01 Oct 2026\r\n 08:00:00 +0000");
+        // Dovecot matches SEARCH HEADER against the unfolded header, so a search string holding the
+        // line break finds nothing there. GreenMail matches the folded text, so it can't show that.
+        assertThat(fingerprint(mime).messageId()).doesNotContain("\r", "\n");
+        assertThat(fingerprint(mime).date()).doesNotContain("\r", "\n");
+        try (ImapDestination destination = imap.connect(destination())) {
+            long uid = destination.append("Junk", mime, null).getAsLong();
+
+            assertThat(destination.find("Junk", fingerprint(mime))).hasValue(uid);
+        }
+    }
+
+    @Test
     void lookingForACopyNeverCreatesAFolder() {
         try (ImapDestination destination = imap.connect(destination())) {
             assertThat(destination.find("Old Junk", fingerprint(TestMessages.mime("m1")))).isEmpty();
