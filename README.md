@@ -13,8 +13,8 @@ instead, and nothing is ever sent.
 
 ## What it does
 
-- **Copies, one way.** Each folder mapping copies one Microsoft folder into one IMAP folder. Nothing
-  is deleted or changed on the IMAP side, ever.
+- **Copies, one way.** Each folder mapping copies one Microsoft folder into one IMAP folder. Apart
+  from creating a missing destination folder, nothing on the IMAP side is ever changed or deleted.
 - **Copies each message once.** A message that was copied is never copied again: not on the next
   poll, not after you delete the copy at the destination, not after you move the original to another
   synced folder in Outlook. The [database](#data-and-backups) remembers each message by its
@@ -187,7 +187,7 @@ again by itself; Podman only does so when its own `podman-restart` service is en
 
 Download `outlook-to-imap-<version>.jar` from the
 [releases](https://github.com/martinfrancois/outlook-to-imap/releases), or build it with
-`mvn package`, which writes `target/outlook-to-imap.jar`.
+`./mvnw package`, which writes `target/outlook-to-imap.jar`.
 
 ```bash
 java -jar outlook-to-imap.jar --config config.yaml authorize hotmail
@@ -204,7 +204,7 @@ to `data` next to the configuration file.
 | `authorize <account>` | Signs one account in, see [Sign in](#sign-in). | 0 when saved |
 | `run` | Polls right away, then once per `pollInterval`, until stopped. The image runs this by default. | 0 after a stop |
 | `once` | Polls every account once and exits. For a manual check, a test, or an external scheduler such as a Kubernetes CronJob. | 0 all accounts fine, 1 an account failed, 3 another process was polling |
-| `once --dry-run` | Lists what a poll would copy and remove, and does neither. Writes nothing. | as `once` |
+| `once --dry-run` | Lists what a poll would copy and remove, and does neither. It records no receipts and moves no checkpoint, but it signs in, which saves the refreshed login, and it creates the database on first use. | as `once` |
 | `status` | Prints each account's last successful poll, last attempt, counts and last error. | 0 |
 
 An invalid configuration exits with 2 and lists every problem at once.
@@ -299,7 +299,10 @@ nothing there gets trained or purged by the provider's spam handling by accident
 - **`GET /health`** on `monitoring.healthPort` (default 8080) answers 200 while polls make progress
   and 503 when the poll loop has made none for two intervals plus 15 minutes. The body is JSON with
   each account's last attempt, last success, counts and last error. The image's `HEALTHCHECK` calls
-  it. Account failures don't make it 503, because restarting the container won't fix a login.
+  it on port 8080. If you change `healthPort` or set it to `0` in the container, also replace the
+  check (`--health-cmd`, or `healthcheck:` in Compose) or turn it off (`--no-healthcheck`), or the
+  container shows as unhealthy. Account failures don't make it 503, because restarting the
+  container won't fix a login.
 - **Heartbeat.** Set `monitoring.heartbeatUrl` to a [healthchecks.io](https://healthchecks.io) check's
   ping URL. After every poll, the service POSTs the summary to the URL when every account worked,
   and to the URL plus `/fail` when one didn't. Set the check's period to your `pollInterval` and a
@@ -313,13 +316,15 @@ nothing there gets trained or purged by the provider's spam handling by accident
 
 ## Reliability
 
-Every message has a receipt in the database before its upload starts, holding the SHA-256 of
+Every message has a receipt in the database before its upload starts, holding the SHA3-256 hash of
 exactly the bytes being sent.
 
 - **An upload that fails or whose reply never arrives** stays pending. The next attempt first
-  searches the destination folder by Message-ID (or by Date, for a message without one) and compares
-  the full content of each candidate by hash. A match is recorded as imported; otherwise the message
-  is uploaded. Spam often reuses Message-IDs, so the id alone never counts.
+  searches the destination it went to by Message-ID (or by Date, for a message without one) and
+  compares the full content of each candidate with the recorded hash. A match is recorded as
+  imported; otherwise the message is uploaded. Spam often reuses Message-IDs, so the id alone never
+  counts. If that destination has since left the configuration, the message is copied to the
+  current one.
 - **A copy counts as imported** only once the server lists it in the folder, not when it answers OK.
 - **One message failing** doesn't stop the others. The folder's position stays where it was, so the
   next poll sees the failed message again; the messages that worked are skipped by their receipts.
@@ -398,7 +403,7 @@ mail, and outlook-to-imap sends nothing.
 ## Development
 
 ```bash
-mvn -B verify
+./mvnw -B verify
 ```
 
 That runs every test, including the PostgreSQL tests through
@@ -409,7 +414,7 @@ coverage. Testcontainers needs Docker or Podman. With rootless Podman:
 systemctl --user enable --now podman.socket
 export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 export TESTCONTAINERS_RYUK_DISABLED=true
-mvn -B verify
+./mvnw -B verify
 ```
 
 The tests run against a real IMAP server (GreenMail) and against Microsoft Graph and the Microsoft

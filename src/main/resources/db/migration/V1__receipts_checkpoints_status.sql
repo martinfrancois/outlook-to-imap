@@ -12,13 +12,13 @@ CREATE TABLE receipt (
     destination         VARCHAR(200)  NOT NULL,
     destination_folder  VARCHAR(1000) NOT NULL,
     internet_message_id VARCHAR(2000),
-    sha256              CHAR(64)      NOT NULL,
+    content_hash        VARCHAR(128)  NOT NULL,
     size_bytes          BIGINT        NOT NULL,
     destination_uid     BIGINT,
     created_at          BIGINT        NOT NULL,
     imported_at         BIGINT,
     removed_at          BIGINT,
-    last_error          VARCHAR(2000),
+    last_error          TEXT,
     PRIMARY KEY (account, message_id)
 );
 
@@ -42,15 +42,15 @@ CREATE TABLE account_status (
     removed         INTEGER      NOT NULL,
     skipped         INTEGER      NOT NULL,
     failed          INTEGER      NOT NULL,
-    last_error      VARCHAR(2000)
+    last_error      TEXT
 );
 
 -- A single row that a poll holds while it runs, so two processes sharing a database never poll
 -- at the same time. An expired lease belongs to a process that died.
-CREATE TABLE run_lease (
+CREATE TABLE poll_lease (
     id         INTEGER NOT NULL PRIMARY KEY,
     holder     VARCHAR(200),
     expires_at BIGINT
 );
 
-INSERT INTO run_lease (id, holder, expires_at) VALUES (1, NULL, NULL);
+INSERT INTO poll_lease (id, holder, expires_at) VALUES (1, NULL, NULL);

@@ -35,7 +35,7 @@ _Avoid_: rule, route, sync pair
 **Copy**:
 The exact bytes of a source message, uploaded unread into a destination folder. Nothing on the
 destination is ever changed or deleted afterwards.
-_Avoid_: sync, mirror, forward, move
+_Avoid_: mirror, forward, move
 
 **Receipt**:
 The record that one message of a source account was copied, keyed by the message's immutable

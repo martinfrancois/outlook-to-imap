@@ -58,18 +58,22 @@ final class TokenCacheFile implements ITokenCacheAccessAspect {
             } else {
                 Files.createDirectories(directory);
             }
-            Path temporary = directory.resolve(file.getFileName() + ".tmp");
-            Files.deleteIfExists(temporary);
-            if (POSIX) {
-                Files.createFile(temporary, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
-            } else {
-                Files.createFile(temporary);
-            }
-            Files.writeString(temporary, content, StandardCharsets.UTF_8);
+            // A unique name, because a dry run or authorize can refresh the same login while the
+            // service does.
+            String prefix = file.getFileName() + ".";
+            Path temporary = POSIX
+                    ? Files.createTempFile(directory, prefix, ".tmp",
+                            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
+                    : Files.createTempFile(directory, prefix, ".tmp");
             try {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+                Files.writeString(temporary, content, StandardCharsets.UTF_8);
+                try {
+                    Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                } catch (AtomicMoveNotSupportedException e) {
+                    Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } finally {
+                Files.deleteIfExists(temporary);
             }
         } catch (IOException e) {
             throw new UncheckedIOException("cannot write token cache " + file, e);

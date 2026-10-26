@@ -14,12 +14,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import ch.fmartin.outlooktoimap.FakeGraph;
 import ch.fmartin.outlooktoimap.FakeGraph.Item;
 import ch.fmartin.outlooktoimap.TestMessages;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.Changes;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.DeltaExpiredException;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.FolderNotFoundException;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.MessageGoneException;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.SourceMessage;
-import ch.fmartin.outlooktoimap.microsoft.GraphMailbox.ThrottledException;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.Changes;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.DeltaExpiredException;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.FolderNotFoundException;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.MessageGoneException;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.SourceMessage;
+import ch.fmartin.outlooktoimap.microsoft.GraphSource.ThrottledException;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import java.util.List;
 import java.util.Map;
@@ -27,7 +27,7 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-class GraphMailboxTest {
+class GraphSourceTest {
 
     private final FakeGraph graph = new FakeGraph();
 
@@ -41,7 +41,7 @@ class GraphMailboxTest {
         List<Item> items = IntStream.range(0, 7).mapToObj(i -> Item.of("m" + i)).toList();
         graph.deltaRound("junkemail", null, "t1", FakeGraph.pages(items, 3));
 
-        Changes changes = graph.mailbox().changes("junkemail", null);
+        Changes changes = graph.source().changes("junkemail", null);
 
         assertThat(changes.messages()).extracting(SourceMessage::id).containsExactly("m0", "m1", "m2", "m3", "m4", "m5", "m6");
         assertThat(changes.messages().getFirst().internetMessageId()).isEqualTo("<m0@example.test>");
@@ -53,7 +53,7 @@ class GraphMailboxTest {
     void asksForImmutableIdsAndLeavesOutMessagesThatLeftTheFolder() {
         graph.deltaRound("junkemail", "t1", "t2", List.of(List.of(Item.of("kept"), Item.removed("gone"))));
 
-        Changes changes = graph.mailbox().changes("junkemail", graph.deltaLink("junkemail", "t1"));
+        Changes changes = graph.source().changes("junkemail", graph.deltaLink("junkemail", "t1"));
 
         assertThat(changes.messages()).extracting(SourceMessage::id).containsExactly("kept");
         graph.server.verify(getRequestedFor(urlPathMatching(".*/delta\\(\\)"))
@@ -64,7 +64,7 @@ class GraphMailboxTest {
     void reportsAnExpiredDeltaLink() {
         graph.expireDeltaToken("junkemail", "old");
 
-        assertThatThrownBy(() -> graph.mailbox().changes("junkemail", graph.deltaLink("junkemail", "old")))
+        assertThatThrownBy(() -> graph.source().changes("junkemail", graph.deltaLink("junkemail", "old")))
                 .isInstanceOf(DeltaExpiredException.class);
     }
 
@@ -73,7 +73,7 @@ class GraphMailboxTest {
         stubThrottledOnce("Retry-After", "1");
         long start = System.nanoTime();
 
-        byte[] mime = graph.mailbox().mime("m1");
+        byte[] mime = graph.source().mime("m1");
 
         assertThat(mime).isEqualTo(TestMessages.mime("m1"));
         assertThat((System.nanoTime() - start) / 1_000_000).isGreaterThanOrEqualTo(900);
@@ -84,7 +84,7 @@ class GraphMailboxTest {
     void backsOffWithoutRetryAfterThenSucceeds() {
         stubThrottledOnce(null, null);
 
-        assertThat(graph.mailbox().mime("m1")).isEqualTo(TestMessages.mime("m1"));
+        assertThat(graph.source().mime("m1")).isEqualTo(TestMessages.mime("m1"));
         graph.server.verify(2, getRequestedFor(urlPathEqualTo("/v1.0/me/messages/m1/$value")));
     }
 
@@ -93,7 +93,7 @@ class GraphMailboxTest {
         graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/messages/m1/$value"))
                 .willReturn(FakeGraph.error(429, "ApplicationThrottled").withHeader("Retry-After", "0")));
 
-        assertThatThrownBy(() -> graph.mailbox().mime("m1")).isInstanceOf(ThrottledException.class);
+        assertThatThrownBy(() -> graph.source().mime("m1")).isInstanceOf(ThrottledException.class);
         // The first attempt plus the two retries the test client allows.
         graph.server.verify(3, getRequestedFor(urlPathEqualTo("/v1.0/me/messages/m1/$value")));
     }
@@ -108,7 +108,7 @@ class GraphMailboxTest {
                 .willReturn(FakeGraph.error(503, "ServiceUnavailable").withHeader("Retry-After", "0"))
                 .willSetStateTo("recovered"));
 
-        Changes changes = graph.mailbox().changes("junkemail", null);
+        Changes changes = graph.source().changes("junkemail", null);
 
         assertThat(changes.messages()).hasSize(4);
     }
@@ -117,14 +117,14 @@ class GraphMailboxTest {
     void reportsAMessageThatNoLongerExists() {
         graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/messages/m1/$value")).willReturn(FakeGraph.error(404, "ErrorItemNotFound")));
 
-        assertThatThrownBy(() -> graph.mailbox().mime("m1")).isInstanceOf(MessageGoneException.class);
+        assertThatThrownBy(() -> graph.source().mime("m1")).isInstanceOf(MessageGoneException.class);
     }
 
     @Test
     void movesToDeletedItems() {
         graph.moveSucceeds();
 
-        graph.mailbox().moveToDeletedItems("m1");
+        graph.source().moveToDeletedItems("m1");
 
         graph.server.verify(postRequestedFor(urlPathEqualTo("/v1.0/me/messages/m1/move"))
                 .withRequestBody(containing("\"deleteditems\"")));
@@ -132,7 +132,7 @@ class GraphMailboxTest {
 
     @Test
     void resolvesWellKnownNamesWithoutAsking() {
-        assertThat(graph.mailbox().resolveFolder("JunkEmail")).isEqualTo("junkemail");
+        assertThat(graph.source().resolveFolder("JunkEmail")).isEqualTo("junkemail");
         assertThat(graph.server.getAllServeEvents()).isEmpty();
     }
 
@@ -148,11 +148,11 @@ class GraphMailboxTest {
         graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders/inbox/childFolders")).willReturn(FakeGraph.okJson(Map.of(
                 "value", List.of(Map.of("id", "f-news", "displayName", "Newsletters"))))));
 
-        GraphMailbox mailbox = graph.mailbox();
+        GraphSource source = graph.source();
 
-        assertThat(mailbox.resolveFolder("projects/2026")).isEqualTo("f-2026");
-        assertThat(mailbox.resolveFolder("Inbox/Newsletters")).isEqualTo("f-news");
-        assertThatThrownBy(() -> mailbox.resolveFolder("Projects/2027")).isInstanceOf(FolderNotFoundException.class)
+        assertThat(source.resolveFolder("projects/2026")).isEqualTo("f-2026");
+        assertThat(source.resolveFolder("Inbox/Newsletters")).isEqualTo("f-news");
+        assertThatThrownBy(() -> source.resolveFolder("Projects/2027")).isInstanceOf(FolderNotFoundException.class)
                 .hasMessageContaining("2027");
     }
 
@@ -160,7 +160,7 @@ class GraphMailboxTest {
     void sendsTheAccessTokenOnlyToGraph() {
         graph.mime("m1", TestMessages.mime("m1"));
 
-        graph.mailbox(() -> "secret-token").mime("m1");
+        graph.source(() -> "secret-token").mime("m1");
 
         graph.server.verify(getRequestedFor(urlPathEqualTo("/v1.0/me/messages/m1/$value"))
                 .withHeader("Authorization", equalTo("Bearer secret-token")));

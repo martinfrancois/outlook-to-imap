@@ -1,7 +1,7 @@
 package ch.fmartin.outlooktoimap.service;
 
-import ch.fmartin.outlooktoimap.sync.RunReport;
-import ch.fmartin.outlooktoimap.sync.Synchronizer;
+import ch.fmartin.outlooktoimap.poll.PollReport;
+import ch.fmartin.outlooktoimap.poll.Poller;
 import ch.fmartin.outlooktoimap.store.Store;
 import java.net.InetAddress;
 import java.time.Clock;
@@ -26,10 +26,11 @@ import org.slf4j.LoggerFactory;
 public final class PollService {
 
     private static final Logger LOG = LoggerFactory.getLogger(PollService.class);
-    // Renewed after every message, so it only runs out when the holder died.
+    // Renewed on a timer and after every message, so it only runs out when the holder died or hung.
     private static final Duration LEASE = Duration.ofMinutes(15);
+    private static final Duration LEASE_RENEWAL = LEASE.dividedBy(5);
 
-    private final Synchronizer synchronizer;
+    private final Poller poller;
     private final Store store;
     private final Heartbeat heartbeat;
     private final Duration interval;
@@ -38,10 +39,11 @@ public final class PollService {
     private final AtomicBoolean stopping = new AtomicBoolean();
     private final AtomicReference<Instant> lastFinished = new AtomicReference<>();
     private final AtomicReference<Instant> lastActivity = new AtomicReference<>();
-    private ScheduledExecutorService executor;
+    // Read by the health endpoint's thread, which may start before start() assigns it.
+    private volatile ScheduledExecutorService executor;
 
-    public PollService(Synchronizer synchronizer, Store store, Heartbeat heartbeat, Duration interval, Clock clock) {
-        this.synchronizer = synchronizer;
+    public PollService(Poller poller, Store store, Heartbeat heartbeat, Duration interval, Clock clock) {
+        this.poller = poller;
         this.store = store;
         this.heartbeat = heartbeat;
         this.interval = interval;
@@ -51,24 +53,46 @@ public final class PollService {
     }
 
     /** Runs one poll if no other process holds the lease. Empty when it was held. */
-    public Optional<RunReport> pollOnce(boolean dryRun, Consumer<String> plan) {
+    public Optional<PollReport> pollOnce(boolean dryRun, Consumer<String> plan) {
         if (dryRun) {
-            return Optional.of(synchronizer.poll(true, plan, stopping::get, () -> {}));
+            return Optional.of(poller.poll(true, plan, stopping::get, () -> {}));
         }
         if (!store.acquireLease(holder, clock.instant(), clock.instant().plus(LEASE))) {
             LOG.warn("another process is polling with the same database; skipping this poll");
             return Optional.empty();
         }
+        AtomicBoolean leaseLost = new AtomicBoolean();
+        Runnable renew = () -> {
+            if (!leaseLost.get() && !store.acquireLease(holder, clock.instant(), clock.instant().plus(LEASE))) {
+                leaseLost.set(true);
+                LOG.error("another process took over the poll lease; stopping this poll at the next message");
+            }
+        };
+        // The timer covers long stretches without messages, such as listing a big folder while
+        // Microsoft throttles; renewing after each message covers the rest.
+        ScheduledExecutorService renewals = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "poll-lease");
+            t.setDaemon(true);
+            return t;
+        });
+        renewals.scheduleAtFixedRate(() -> {
+            try {
+                renew.run();
+            } catch (RuntimeException e) {
+                LOG.warn("renewing the poll lease failed", e);
+            }
+        }, LEASE_RENEWAL.toMillis(), LEASE_RENEWAL.toMillis(), TimeUnit.MILLISECONDS);
         try {
-            RunReport report = synchronizer.poll(false, plan, stopping::get, () -> {
+            PollReport report = poller.poll(false, plan, () -> stopping.get() || leaseLost.get(), () -> {
                 lastActivity.set(clock.instant());
-                store.acquireLease(holder, clock.instant(), clock.instant().plus(LEASE));
+                renew.run();
             });
             lastFinished.set(clock.instant());
             lastActivity.set(clock.instant());
             heartbeat.report(report);
             return Optional.of(report);
         } finally {
+            renewals.shutdownNow();
             store.releaseLease(holder);
         }
     }

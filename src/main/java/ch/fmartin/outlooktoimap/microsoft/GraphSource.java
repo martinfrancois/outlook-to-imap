@@ -23,7 +23,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.URI;
-import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,12 +35,12 @@ import java.util.function.UnaryOperator;
 import okhttp3.OkHttpClient;
 
 /**
- * One Microsoft mailbox, read through Graph. The Graph SDK pages, retries throttled requests
+ * One source account, read through Graph. The Graph SDK pages, retries throttled requests
  * (honouring {@code Retry-After}, with capped exponential backoff otherwise) and parses replies;
  * this class picks the requests and turns Graph's error replies into the cases the copy logic
  * handles differently.
  */
-public final class GraphMailbox {
+public final class GraphSource {
 
     public static final String DEFAULT_BASE_URL = "https://graph.microsoft.com/v1.0";
 
@@ -53,17 +52,20 @@ public final class GraphMailbox {
 
     // Immutable ids survive moves between folders, so one message keeps one receipt.
     private static final String IMMUTABLE_IDS = "IdType=\"ImmutableId\"";
-    private static final String PAGE_SIZE = "odata.maxpagesize=100";
+    // Graph's largest page for messages, so a big backlog needs the fewest requests.
+    private static final int PAGE_SIZE = 100;
+    private static final String PREFER_PAGE_SIZE = "odata.maxpagesize=" + PAGE_SIZE;
+    private static final String[] FOLDER_FIELDS = {"id", "displayName"};
     private static final String[] DELTA_FIELDS = {"id", "internetMessageId", "receivedDateTime"};
 
     private final GraphServiceClient client;
 
-    public GraphMailbox(Supplier<String> accessToken) {
+    public GraphSource(Supplier<String> accessToken) {
         this(accessToken, DEFAULT_BASE_URL, new RetryHandlerOption(null, 5, RetryHandlerOption.DEFAULT_DELAY));
     }
 
     /** Lets tests point the client at a local server and shorten the retry delays. */
-    public GraphMailbox(Supplier<String> accessToken, String baseUrl, RetryHandlerOption retry) {
+    public GraphSource(Supplier<String> accessToken, String baseUrl, RetryHandlerOption retry) {
         String host = URI.create(baseUrl).getHost();
         AccessTokenProvider tokens = new AccessTokenProvider() {
             private final AllowedHostsValidator hosts = new AllowedHostsValidator(host);
@@ -80,7 +82,6 @@ public final class GraphMailbox {
         };
         OkHttpClient http = GraphClientFactory.create(new RequestOption[] {retry})
                 .addInterceptor(chain -> chain.proceed(chain.request().newBuilder().addHeader("Prefer", IMMUTABLE_IDS).build()))
-                .callTimeout(Duration.ofMinutes(10))
                 .build();
         this.client = new GraphServiceClient(new BaseBearerTokenAuthenticationProvider(tokens), http);
         this.client.getRequestAdapter().setBaseUrl(baseUrl);
@@ -109,12 +110,12 @@ public final class GraphMailbox {
     private String childFolder(String parentId, String displayName, String source) {
         MailFolderCollectionResponse page = call(() -> parentId == null
                 ? client.me().mailFolders().get(rc -> {
-                    rc.queryParameters.top = 100;
-                    rc.queryParameters.select = new String[] {"id", "displayName"};
+                    rc.queryParameters.top = PAGE_SIZE;
+                    rc.queryParameters.select = FOLDER_FIELDS;
                 })
                 : client.me().mailFolders().byMailFolderId(parentId).childFolders().get(rc -> {
-                    rc.queryParameters.top = 100;
-                    rc.queryParameters.select = new String[] {"id", "displayName"};
+                    rc.queryParameters.top = PAGE_SIZE;
+                    rc.queryParameters.select = FOLDER_FIELDS;
                 }));
         List<String> found = new ArrayList<>();
         iterate(page, MailFolderCollectionResponse::createFromDiscriminatorValue, (MailFolder folder) -> {
@@ -141,7 +142,7 @@ public final class GraphMailbox {
                 delta = delta.withUrl(deltaLink);
             }
             return delta.get(rc -> {
-                rc.headers.add("Prefer", PAGE_SIZE);
+                rc.headers.add("Prefer", PREFER_PAGE_SIZE);
                 if (deltaLink == null) {
                     rc.queryParameters.select = DELTA_FIELDS;
                 }
@@ -156,7 +157,7 @@ public final class GraphMailbox {
             }
             return true;
         }, request -> {
-            request.headers.add("Prefer", PAGE_SIZE);
+            request.headers.add("Prefer", PREFER_PAGE_SIZE);
             return request;
         });
         return new Changes(messages, nextDeltaLink);
@@ -252,7 +253,8 @@ public final class GraphMailbox {
     /** Graph kept throttling after the SDK's retries ran out. */
     public static final class ThrottledException extends GraphException {
         ThrottledException(int status, Throwable cause) {
-            super("Microsoft throttled the mailbox (HTTP " + status + ") after every retry; trying again next poll", cause);
+            super("Microsoft throttled the mailbox or was unavailable (HTTP " + status + ") after every retry;"
+                    + " trying again next poll", cause);
         }
     }
 

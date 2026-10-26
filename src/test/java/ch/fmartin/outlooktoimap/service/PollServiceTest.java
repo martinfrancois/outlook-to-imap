@@ -16,14 +16,17 @@ import ch.fmartin.outlooktoimap.FakeImap;
 import ch.fmartin.outlooktoimap.TestMessages;
 import ch.fmartin.outlooktoimap.config.Config;
 import ch.fmartin.outlooktoimap.config.Config.Account;
+import ch.fmartin.outlooktoimap.config.Config.Destination;
 import ch.fmartin.outlooktoimap.config.Config.FolderMapping;
 import ch.fmartin.outlooktoimap.config.Config.Microsoft;
 import ch.fmartin.outlooktoimap.config.Config.Monitoring;
+import ch.fmartin.outlooktoimap.imap.DestinationConnection;
+import ch.fmartin.outlooktoimap.imap.Fingerprint;
 import ch.fmartin.outlooktoimap.microsoft.AccessTokens;
 import ch.fmartin.outlooktoimap.microsoft.ReauthorizationRequiredException;
 import ch.fmartin.outlooktoimap.store.Store;
-import ch.fmartin.outlooktoimap.sync.RunReport;
-import ch.fmartin.outlooktoimap.sync.Synchronizer;
+import ch.fmartin.outlooktoimap.poll.PollReport;
+import ch.fmartin.outlooktoimap.poll.Poller;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -34,9 +37,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -79,9 +85,9 @@ class PollServiceTest {
 
     @Test
     void aSuccessfulPollPingsTheHeartbeat() {
-        Optional<RunReport> report = service(a -> "token").pollOnce(false, line -> {});
+        Optional<PollReport> report = service(a -> "token").pollOnce(false, line -> {});
 
-        assertThat(report).get().extracting(RunReport::succeeded).isEqualTo(true);
+        assertThat(report).get().extracting(PollReport::succeeded).isEqualTo(true);
         healthchecks.verify(1, postRequestedFor(urlPathEqualTo("/ping")).withRequestBody(containing("hotmail: 1 imported")));
         healthchecks.verify(0, postRequestedFor(urlPathEqualTo("/ping/fail")));
     }
@@ -112,7 +118,25 @@ class PollServiceTest {
     }
 
     @Test
-    void aDryRunIgnoresTheLeaseBecauseItWritesNothing() {
+    void aPollThatLosesTheLeaseStopsBeforeTheNextMessage() {
+        graph.mime("m2", TestMessages.mime("m2"));
+        graph.deltaRound("junkemail", null, "t1", List.of(List.of(Item.of("m1"), Item.of("m2"))));
+        // While the first message uploads, this process hangs past its lease and another takes over.
+        Function<Destination, DestinationConnection> stalling = d -> new AfterAppend(fastmail.connect(d), () -> {
+            clock.advance(Duration.ofMinutes(16));
+            assertThat(store.acquireLease("other-host/1", clock.instant(), clock.instant().plusSeconds(900))).isTrue();
+        });
+
+        Optional<PollReport> report = service(a -> "token", stalling).pollOnce(false, line -> {});
+
+        assertThat(report).isPresent();
+        assertThat(fastmail.messages("Outlook Junk")).hasSize(1);
+        assertThat(store.receipt("hotmail", "m2")).isEmpty();
+        assertThat(store.acquireLease("third-host/1", clock.instant(), clock.instant().plusSeconds(900))).isFalse();
+    }
+
+    @Test
+    void aDryRunIgnoresTheLeaseBecauseItCopiesAndRemovesNothing() {
         store.acquireLease("other-host/1", clock.instant(), clock.instant().plusSeconds(900));
 
         assertThat(service(a -> "token").pollOnce(true, line -> {})).isPresent();
@@ -129,7 +153,8 @@ class PollServiceTest {
             waitFor(() -> service.lastFinished() != null);
             HttpResponse<String> response = get(health);
             assertThat(response.statusCode()).isEqualTo(200);
-            assertThat(response.body()).contains("\"status\":\"up\"").contains("\"account\":\"hotmail\"").contains("\"imported\":1");
+            assertThat(response.body()).contains("\"status\":\"up\"").contains("\"account\":\"hotmail\"").contains("\"imported\":1")
+                    .contains("\"lastPollFinishedAt\":\"2026-10-26T10:00:00Z\"");
 
             // Two intervals plus the lease margin without progress means the poll loop is stuck.
             clock.advance(Duration.ofHours(2).plusMinutes(16));
@@ -141,9 +166,26 @@ class PollServiceTest {
         assertThat(service.healthy()).isFalse();
     }
 
+    @Test
+    void theHealthEndpointAnswers503WithTheReasonWhenTheStatusCannotBeRead() throws Exception {
+        Store closed = Store.open(Databases.fresh(Engine.SQLITE, directory.resolve("closed")));
+        closed.close();
+
+        try (HealthServer health = new HealthServer(0, service(a -> "token"), closed)) {
+            HttpResponse<String> response = get(health);
+
+            assertThat(response.statusCode()).isEqualTo(503);
+            assertThat(response.body()).contains("\"status\":\"down\"").contains("\"error\":");
+        }
+    }
+
     private PollService service(AccessTokens tokens) {
-        Synchronizer synchronizer = new Synchronizer(config, store, tokens, a -> graph.mailbox(), fastmail::connect, clock);
-        return new PollService(synchronizer, store, new Heartbeat(healthchecks.baseUrl() + "/ping"), config.pollInterval(), clock);
+        return service(tokens, fastmail::connect);
+    }
+
+    private PollService service(AccessTokens tokens, Function<Destination, DestinationConnection> destinations) {
+        Poller poller = new Poller(config, store, tokens, a -> graph.source(), destinations, clock);
+        return new PollService(poller, store, new Heartbeat(healthchecks.baseUrl() + "/ping"), config.pollInterval(), clock);
     }
 
     private static HttpResponse<String> get(HealthServer health) throws Exception {
@@ -159,6 +201,31 @@ class PollServiceTest {
                 throw new AssertionError("condition not met within 30 seconds");
             }
             Thread.sleep(20);
+        }
+    }
+
+    /** Runs {@code then} after each upload. */
+    private record AfterAppend(DestinationConnection delegate, Runnable then) implements DestinationConnection {
+        @Override
+        public OptionalLong append(String folder, byte[] mime, Date received) {
+            OptionalLong uid = delegate.append(folder, mime, received);
+            then.run();
+            return uid;
+        }
+
+        @Override
+        public boolean contains(String folder, long uid) {
+            return delegate.contains(folder, uid);
+        }
+
+        @Override
+        public OptionalLong find(String folder, Fingerprint fingerprint) {
+            return delegate.find(folder, fingerprint);
+        }
+
+        @Override
+        public void close() {
+            delegate.close();
         }
     }
 
