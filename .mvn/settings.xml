@@ -5,7 +5,8 @@
      Costs: a dependency published only outside Central won't resolve until it gets its own
      repository and mirror exclusion here; and with a system mvn instead of ./mvnw, this file
      replaces that installation's conf/settings.xml, so proxies or mirrors set there don't apply
-     (put them in ~/.m2/settings.xml, which still applies on top). -->
+     (put them in ~/.m2/settings.xml, which still applies on top).
+     See docs/adr/0019-resolve-every-dependency-from-maven-central.md. -->
 <settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
     <mirrors>
         <mirror>
