@@ -1,0 +1,133 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":rebaseStalePrs"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "rangeStrategy": "pin",
+  "pinDigests": true,
+  "prConcurrentLimit": 0,
+  "branchConcurrentLimit": 0,
+  "minimumReleaseAge": "7 days",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
+  "internalChecksFilter": "strict",
+  "statusCheckWhen": {
+    "minimumReleaseAge": "never"
+  },
+  "dependencyDashboardApproval": false,
+  "separateMajorMinor": true,
+  "separateMultipleMajor": true,
+  "automergeType": "pr",
+  "ignoreTests": false,
+  "separateMinorPatch": false,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": [
+      "security"
+    ],
+    "minimumReleaseAge": null,
+    "schedule": [],
+    "updateNotScheduled": true,
+    "groupName": null,
+    "groupSlug": null
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The minimum Java version of the jar, maven.compiler.release in pom.xml. The maven manager reads plugin versions but not this property. endoflife.date lists one entry per feature release with its release date, which timestamp-required needs.",
+      "managerFilePatterns": [
+        "/(^|/)pom\\.xml$/"
+      ],
+      "matchStrings": [
+        "<maven\\.compiler\\.release>(?<currentValue>\\d+)</maven\\.compiler\\.release>"
+      ],
+      "depNameTemplate": "java-minimum",
+      "packageNameTemplate": "eclipse-temurin",
+      "datasourceTemplate": "endoflife-date",
+      "extractVersionTemplate": "^(?<version>\\d+)",
+      "versioningTemplate": "loose"
+    },
+    {
+      "customType": "regex",
+      "description": "The Java version the release workflow builds with. The test matrix in ci.yml needs no entry: it reads every current LTS from endoflife.date at run time.",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/release-please\\.yml$/"
+      ],
+      "matchStrings": [
+        "java-version: \"(?<currentValue>\\d+)\""
+      ],
+      "depNameTemplate": "java-release-build",
+      "packageNameTemplate": "eclipse-temurin",
+      "datasourceTemplate": "endoflife-date",
+      "extractVersionTemplate": "^(?<version>\\d+)",
+      "versioningTemplate": "loose"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Public repository: merge eligible non-major updates after checks pass. Group only dependencies that need coordinated updates; keep unrelated updates separate.",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "pinDigest",
+        "digest"
+      ],
+      "automerge": true,
+      "platformAutomerge": true
+    },
+    {
+      "description": "Major updates land one at a time and are merged by a human after review of the migration notes.",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false,
+      "addLabels": [
+        "major update"
+      ]
+    },
+    {
+      "description": "Flyway's database modules must match flyway-core exactly.",
+      "matchPackageNames": [
+        "org.flywaydb:*"
+      ],
+      "groupName": "flyway"
+    },
+    {
+      "description": "Testcontainers modules are released together and must match.",
+      "matchPackageNames": [
+        "org.testcontainers:*"
+      ],
+      "groupName": "testcontainers"
+    },
+    {
+      "description": "Only Java LTS releases, which follow the four-release cadence from 25 (25, 29, 33, ...). Non-LTS releases get six months of updates, too short for a service meant to run unattended. Update this rule if the vendor LTS policy changes.",
+      "matchDepNames": [
+        "java-minimum",
+        "java-release-build"
+      ],
+      "allowedVersions": "/^(?:2[59]|3[37]|[468][159]|[579][37]|[1-9][0-9]*(?:0[159]|[2468][159]|[13579][37]))$/"
+    },
+    {
+      "description": "Same LTS-only rule for the runtime image, whose tag is <java>-jre.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "docker.io/library/eclipse-temurin"
+      ],
+      "allowedVersions": "/^(?:2[59]|3[37]|[468][159]|[579][37]|[1-9][0-9]*(?:0[159]|[2468][159]|[13579][37]))-jre$/"
+    },
+    {
+      "description": "Raising the minimum Java version raises the minimum for everyone running the jar, which is the maintainer's decision, so the Dependency Dashboard holds the pull request until a human ticks the box. CI already tests every newer LTS on its own.",
+      "matchDepNames": [
+        "java-minimum"
+      ],
+      "dependencyDashboardApproval": true
+    }
+  ]
+}
