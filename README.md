@@ -181,7 +181,9 @@ its native library there and loads it, and Docker mounts a `--tmpfs` with `noexe
 otherwise. `examples/compose.yaml` sets the same options.
 
 The image runs as user `outlook-to-imap` (uid 10001), not root. The ownership setup above gives it
-the configuration, the secrets directory and its files while keeping them private. Do this before
+the configuration, the secrets directory and its files while keeping them private. The `chown`
+hands them to user id 10001 on the host too, so a real user with that id on the host could read
+them; with Podman, `podman unshare chown` gives them to a subordinate id instead. Do this before
 the first `authorize` command. You may need `sudo` to edit those host files afterward. For a jar
 running as your own user, keep their ownership unchanged.
 
