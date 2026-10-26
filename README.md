@@ -244,7 +244,8 @@ To sign in, use a web browser to open https://microsoft.com/devicelogin and ente
 
 Open that page on any device, such as your phone, enter the code, and sign in with the account's
 Microsoft address. The command saves the login and exits. Do it once per account. Signing in with a
-different address than the account's `email` is refused and nothing is saved.
+different address than the account's `email` is refused and its login is removed again. If that
+removal fails, the command says which file to delete by hand.
 
 Use the exact URL printed by the command. For personal accounts Microsoft can return
 `https://www.microsoft.com/link` with an eight-character code instead of the example above.
