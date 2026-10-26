@@ -366,6 +366,11 @@ public final class Store implements AutoCloseable {
     }
 
     private static String truncate(String value, int maxLength) {
-        return value == null || value.length() <= maxLength ? value : value.substring(0, maxLength);
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        // A cut between the two halves of a surrogate pair would be stored as a trailing "?".
+        int end = Character.isHighSurrogate(value.charAt(maxLength - 1)) ? maxLength - 1 : maxLength;
+        return value.substring(0, end);
     }
 }
