@@ -48,6 +48,11 @@ in a Microsoft Entra directory, and a personal Microsoft account doesn't have on
    your account has no directory, create a free
    [Azure account](https://azure.microsoft.com/free/) with the same Microsoft account. That creates
    one, and the steps below never create anything that costs money.
+   Azure signup can require phone and payment-card verification, and Microsoft may require you to
+   set up multifactor authentication. Complete those steps yourself in Microsoft's browser pages.
+   After signup, select the new directory in the portal. If the portal still shows the old
+   no-directory error, refresh it before trying registration again. You don't need to deploy an
+   Azure resource for this service.
 2. Go to **Entra ID > App registrations > New registration**.
 3. Name it `outlook-to-imap`, or anything else. Your accounts will see this name when they sign in.
 4. Under **Supported account types**, choose **Personal Microsoft accounts only**. For work or
@@ -55,7 +60,7 @@ in a Microsoft Entra directory, and a personal Microsoft account doesn't have on
 5. Leave **Redirect URI** empty and select **Register**.
 6. Copy the **Application (client) ID** from the overview page into `microsoft.clientId`.
 7. Open **Authentication**, set **Allow public client flows** to **Yes**, and save. The sign-in
-   code flow below needs it.
+   code flow below needs it. In the newer Authentication page, this switch is under **Settings**.
 
 The app needs no secret and no certificate. You don't have to add permissions under
 **API permissions** either: each account grants `Mail.Read` (or `Mail.ReadWrite`, for source
@@ -119,8 +124,9 @@ accounts:
 | `accounts[].folders[].folder` | none | The IMAP folder, created if it doesn't exist. Use `/` between levels, such as `Outlook/Junk`. |
 | `accounts[].folders[].removeSourceAfterSync` | `false` | See [Source removal](#source-removal). |
 
-Passwords and tokens never go in this file, so it can live in Git. Keep the password files and the
-state directory out of Git.
+Passwords and tokens never go in this file. It still contains your email addresses and folder
+names, so remove those before sharing it. Keep the password files and the state directory out of
+Git and shared or cloud-synced folders.
 
 ## Run it
 
@@ -129,9 +135,11 @@ All three ways run the same jar and read the same configuration. Pick the one yo
 ### Docker
 
 ```bash
+umask 077
 mkdir -p outlook-to-imap/secrets && cd outlook-to-imap
 # write config.yaml, see Configuration
-printf '%s\n' 'your-app-password' > secrets/fastmail-app-password
+# Save the app password as plain text in secrets/fastmail-app-password using your editor.
+# Do not put the password in a shell command, where shell history could save it.
 chmod 600 secrets/fastmail-app-password
 
 docker volume create outlook-to-imap-data
@@ -233,6 +241,11 @@ Open that page on any device, such as your phone, enter the code, and sign in wi
 Microsoft address. The command saves the login and exits. Do it once per account. Signing in with a
 different address than the account's `email` is refused and nothing is saved.
 
+Use the exact URL printed by the command. For personal accounts Microsoft can return
+`https://www.microsoft.com/link` with an eight-character code instead of the example above.
+Entering that code at `microsoft.com/devicelogin` can fail. Keep the command running while you sign
+in. If the code expires, run `authorize` again and use its new code.
+
 The account grants `Mail.Read` and `offline_access`, which lets the service refresh its login
 unattended. Accounts with source removal on any folder grant `Mail.ReadWrite` instead. Nothing
 ever asks for `Mail.Send`.
@@ -292,6 +305,55 @@ Messages arrive with IMAP `APPEND`, the command mail clients use to save drafts 
 
 Servers that only accept OAuth logins don't work as destinations. That includes Outlook.com itself.
 
+### Hotmail to Fastmail example
+
+Use a Fastmail plan that supports IMAP. Fastmail's Basic plan does not support app passwords for
+third-party mail clients. The [Fastmail app-password guide](https://www.fastmail.help/hc/en-us/articles/360058752854)
+describes the current account requirements.
+
+1. In Fastmail, open **Settings > Privacy & Security > Manage app passwords and access**. This
+   opens **Connected apps**. Create a new app password, completing password verification if asked.
+2. Give it a recognisable name, such as `outlook-to-imap`. Choose IMAP access only and leave
+   **Read-only** unchecked, because copying mail needs IMAP write access. SMTP, contacts and
+   calendar access are unnecessary.
+3. Save the generated password in the file named by `passwordFile`, then close the password
+   display. Use this app password, not your normal Fastmail password. Protect the file as shown
+   under [Run it](#run-it), including container ownership if you run Docker or Podman.
+4. Set `host: imap.fastmail.com`, `port: 993` and `security: tls`. For `username`, use your full
+   primary Fastmail login address, not an alias. The account menu shows your login address.
+   See [Fastmail's server settings](https://www.fastmail.help/hc/en-us/articles/1500000278342).
+5. Use the configuration example above with your Hotmail address. Keep `source: junkemail` even
+   if Outlook displays a translated Junk folder name. Choose a new ordinary destination folder,
+   such as `Outlook test/Hotmail Junk`, and keep `removeSourceAfterSync: false`. The service creates
+   the destination folder when it first uploads a message.
+6. Run `authorize hotmail` and complete Microsoft's sign-in and mail-access consent. Then run
+   `once --dry-run` to inspect what would be copied. A dry run checks the source, but does not
+   prove that Fastmail accepts uploads.
+7. Run `once`, check its exit code and `status`, and inspect the new folder in Fastmail. Copies
+   should arrive unread, with the original received dates and attachments. The originals remain
+   in Hotmail's Junk folder. Run `once` again with the same configuration and state directory.
+   It should import zero messages unless new mail arrived between polls.
+
+For example, when running the jar, the checks are:
+
+```bash
+java -jar outlook-to-imap.jar --config config.yaml once --dry-run
+java -jar outlook-to-imap.jar --config config.yaml once
+java -jar outlook-to-imap.jar --config config.yaml status
+java -jar outlook-to-imap.jar --config config.yaml once
+```
+
+To test source removal, first copy a few messages into a new disposable folder in Outlook.
+Add a folder mapping for that folder to another new Fastmail folder, and enable removal only on
+that mapping. Leave the real Junk mapping set to `false`. Run `authorize` again for the added
+`Mail.ReadWrite` permission, then dry-run and poll. Verify that only the disposable source copies
+moved to Deleted Items and that another poll does not duplicate their destination copies.
+
+For a second Hotmail or Live account, add another `accounts` entry with a distinct, permanent
+`name` and a separate destination folder, then authorize that account. Both entries can use the
+same app registration and Fastmail destination. You don't need a second browser session; select
+the matching Microsoft account during each sign-in.
+
 Imported messages skip the destination's incoming-mail pipeline. Spam filters, sieve rules and
 forwarding run when a message is delivered by SMTP, and an `APPEND` is not a delivery, so none of
 them see these messages. Copies land exactly in the folder you configured and stay there until you
@@ -344,6 +406,18 @@ exactly the bytes being sent.
 One limit: if the destination server changes messages as it stores them, the content check can't
 match them. A crash at exactly the moment between storing and answering would then leave a
 duplicate. Fastmail, Gmail and Dovecot store messages unchanged.
+
+Local mail-scanning software can also change the bytes returned by IMAP. For example, an antivirus
+can add `X-Antivirus` headers to fetched mail even when Fastmail's **Show raw message** view shows
+the original unchanged. This also prevents the pending-upload content check from matching. Check
+the scanner's settings and repeat a small copy-and-readback test before relying on crash recovery.
+Do not ignore header differences in the fingerprint check.
+
+If Java reports `PKIX path building failed`, check the certificate issuer. A local TLS-inspecting
+scanner may use a root certificate that macOS trusts but Java does not. Use only a certificate
+you have verified and already trust, in a dedicated Java trust store that also retains the JDK's
+public roots. Replacing those roots with only a local certificate can fix IMAP while breaking
+Microsoft sign-in. Keep certificate and hostname verification enabled.
 
 ## Data and backups
 
