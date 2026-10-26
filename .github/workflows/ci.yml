@@ -62,7 +62,7 @@ jobs:
       # Runs the tests against SQLite and, through Testcontainers and the runner's Docker,
       # PostgreSQL, then enforces the coverage gate.
       - name: Verify
-        run: mvn -B verify
+        run: ./mvnw -B verify
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

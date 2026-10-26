@@ -1,3 +1,5 @@
 *
 !pom.xml
+!mvnw
+!.mvn/
 !src/main/
