@@ -8,13 +8,22 @@ on:
 permissions:
   contents: read
 
+# A later run waits instead of cancelling a release in progress. A queued run that a newer one
+# replaces loses nothing: release-please releases every merged release pull request still labeled
+# "autorelease: pending".
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-please:
     name: Prepare or publish a release
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
     permissions:
-      actions: write
       contents: write
       issues: write
       pull-requests: write
@@ -29,16 +38,6 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-
-      - name: Run CI on the release pull request
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
-        # The pull request arrives as JSON text and is parsed in the script: an expression such as
-        # fromJSON fails the step whenever the output is empty.
-        env:
-          GH_REPO: ${{ github.repository }}
-          GH_TOKEN: ${{ github.token }}
-          PULL_REQUEST: ${{ steps.release.outputs.pr }}
-        run: gh workflow run ci.yml --ref "$(jq -r '.headBranchName' <<< "$PULL_REQUEST")"
 
       - name: Check out the release tag
         if: ${{ steps.release.outputs.release_created == 'true' }}
@@ -143,3 +142,62 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag_name }}
         run: gh release edit "$TAG" --draft=false --latest
+
+  # Without this job each release pull request update waits for a manual approval; docs/adr/0025-the-release-workflow-approves-its-own-pull-request-runs.md
+  # A job of its own after the release job, so its failure never stops a release.
+  approve-release-pr-runs:
+    name: Approve the release pull request's runs
+    needs: release-please
+    if: ${{ !cancelled() && needs.release-please.outputs.prs_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Approve the held runs on the release branch head
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST: ${{ needs.release-please.outputs.pr }}
+          # GitHub creates the held runs a few seconds after the push. The number of pull_request
+          # workflows isn't known here, so the step keeps approving for the whole window.
+          WAIT_SECONDS: 90
+          POLL_SECONDS: 5
+        run: |
+          set -euo pipefail
+          branch=$(jq -r '.headBranchName' <<< "$PULL_REQUEST")
+          # The branch ref, because the pull request's head lags a moment behind the push.
+          sha=$(gh api "repos/$GH_REPO/git/ref/heads/$branch" --jq '.object.sha')
+          # A run approved a moment ago can still be listed as held, and a second approval may fail.
+          declare -A approved=()
+          deadline=$((SECONDS + WAIT_SECONDS))
+          while (( SECONDS < deadline )); do
+            # The URL pins the commit. jq keeps runs of this repository that the Actions token's
+            # push caused, so a fork's run or a person's push still waits for a maintainer.
+            ids=$(gh api "repos/$GH_REPO/actions/runs?event=pull_request&status=action_required&head_sha=$sha&per_page=100" |
+              jq -r --arg repo "$GH_REPO" '.workflow_runs[]
+                | select(.head_repository.full_name == $repo and .actor.login == "github-actions[bot]")
+                | .id')
+            for id in $ids; do
+              [[ -v approved[$id] ]] && continue
+              gh api -X POST "repos/$GH_REPO/actions/runs/$id/approve" --silent
+              approved[$id]=1
+              echo "Approved run $id on $sha"
+            done
+            sleep "$POLL_SECONDS"
+          done
+          if (( ${#approved[@]} > 0 )); then
+            exit 0
+          fi
+          # release-please reports a pull request only when it pushed the branch, so a head with no
+          # pull_request run at all means the pull request has no checks.
+          runs=$(gh api "repos/$GH_REPO/actions/runs?event=pull_request&head_sha=$sha&per_page=100" |
+            jq --arg repo "$GH_REPO" '[.workflow_runs[] | select(.head_repository.full_name == $repo)] | length')
+          if (( runs == 0 )); then
+            echo "::error::No pull_request run for $sha appeared within $WAIT_SECONDS seconds"
+            exit 1
+          fi
+          # Someone approved them first, a person pushed after release-please, or GitHub stopped
+          # holding these runs. CI runs either way; the last case makes this job unnecessary.
+          echo "::warning::No held run to approve on $sha, but $runs pull_request runs exist"

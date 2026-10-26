@@ -8,6 +8,13 @@ informed: [Future maintainers and agents working on this repository]
 
 # Releases with release-please, after a live check
 
+The CI on release pull requests changed in
+[ADR 0025](0025-the-release-workflow-approves-its-own-pull-request-runs.md). The release workflow
+no longer starts `ci.yml` with `gh workflow run`, it approves the held `pull_request` runs instead.
+The bullet about that dispatch, the consequence about manual approval, the confirmation line about
+the step "Run CI on the release pull request" and the "extra CI dispatch" under the chosen option's
+cons describe the state before that record.
+
 ## Context and Problem Statement
 
 junkEmailMover published nothing: CI built and tested, and people built the jar themselves. The new
