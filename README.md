@@ -356,7 +356,11 @@ moved to Deleted Items and that another poll does not duplicate their destinatio
 For a second Hotmail or Live account, add another `accounts` entry with a distinct, permanent
 `name` and a separate destination folder, then authorize that account. Both entries can use the
 same app registration and Fastmail destination. You don't need a second browser session; select
-the matching Microsoft account during each sign-in.
+the matching Microsoft account during each sign-in. If the browser keeps choosing the first
+account, open an Incognito window or a separate browser profile, sign into Outlook with the
+second account, and open that account's device-login URL in the same window. Signing into
+Outlook alone does not authorize this service: complete the device-code flow and wait for
+`Saved the login of account <name>` before polling.
 
 Imported messages skip the destination's incoming-mail pipeline. Spam filters, sieve rules and
 forwarding run when a message is delivered by SMTP, and an `APPEND` is not a delivery, so none of
@@ -416,6 +420,14 @@ can add `X-Antivirus` headers to fetched mail even when Fastmail's **Show raw me
 the original unchanged. This also prevents the pending-upload content check from matching. Check
 the scanner's settings and repeat a small copy-and-readback test before relying on crash recovery.
 Do not ignore header differences in the fingerprint check.
+
+For a controlled diagnostic on Avast Security for Mac, the setting is **Preferences > Email
+Guard > Scan secure connections**. Temporarily turning it off stops inspection of encrypted
+mail traffic on that Mac. Record its original state, test with a fresh IMAP connection, and
+restore it immediately afterward. Keep the other shields and TLS verification enabled. An
+email-domain exception did not prevent readback changes in the live check. For unattended use,
+choose an environment where IMAP readback preserves the uploaded bytes; a diagnostic with
+scanning off does not prove recovery will work after scanning is restored.
 
 If Java reports `PKIX path building failed`, check the certificate issuer. A local TLS-inspecting
 scanner may use a root certificate that macOS trusts but Java does not. Use only a certificate
