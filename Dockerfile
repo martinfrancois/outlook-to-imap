@@ -1,6 +1,11 @@
 # Builds the same shaded jar as `./mvnw package` and runs it on a Java 25 runtime.
 FROM docker.io/library/eclipse-temurin:25-jdk@sha256:2d5d5e9b533342a565907c84f47a2ec298c40cde7b13a3ca85d4950fa456a641 AS build
 WORKDIR /src
+# Without unzip the wrapper downloads Maven's .tar.gz instead of the .zip whose SHA-256
+# maven-wrapper.properties holds, and stops at the checksum.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends unzip \
+    && rm -rf /var/lib/apt/lists/*
 # The wrapper pins the Maven version, so the image builds with the same Maven as CI.
 COPY mvnw pom.xml ./
 COPY .mvn ./.mvn
