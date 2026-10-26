@@ -1,0 +1,37 @@
+# outlook-to-imap configuration. Every key is described in the README under "Configuration".
+# Relative paths are resolved against the directory this file is in.
+
+microsoft:
+  # The Application (client) ID of your own app registration, see "Register an app" in the README.
+  clientId: 00000000-0000-0000-0000-000000000000
+
+# Copy once per hour. ISO-8601 duration, between PT1M and P30D.
+pollInterval: PT1H
+
+monitoring:
+  # Optional: a healthchecks.io ping URL. Pinged after every poll, with /fail when an account failed.
+  # heartbeatUrl: https://hc-ping.com/your-check-uuid
+
+destinations:
+  fastmail:
+    host: imap.fastmail.com
+    username: you@fastmail.com
+    # A Fastmail app password with IMAP access, alone in this file.
+    passwordFile: secrets/fastmail-app-password
+
+accounts:
+  - name: hotmail
+    email: you@hotmail.com
+    folders:
+      # Outlook's Junk folder into a review folder at Fastmail. Outlook keeps its messages.
+      - source: junkemail
+        destination: fastmail
+        folder: Outlook Junk
+        removeSourceAfterSync: false
+
+  - name: live
+    email: you@live.com
+    folders:
+      - source: junkemail
+        destination: fastmail
+        folder: Live Junk

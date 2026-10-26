@@ -1,0 +1,6 @@
+/target/
+/.idea/
+*.iml
+# A local run with the example layout keeps its tokens and database here.
+/data/
+/config.yaml
