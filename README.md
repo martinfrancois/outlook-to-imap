@@ -110,7 +110,7 @@ accounts:
 | `destinations.<name>.security` | `tls` | `tls` or `starttls`. There is no plain-text option. |
 | `destinations.<name>.username` | none | IMAP login. |
 | `destinations.<name>.passwordFile` | none | File holding the password or app password. Surrounding whitespace is ignored. |
-| `accounts[].name` | none | Your name for the account, used in commands and logs. Letters, digits, `.`, `_`, `-`. |
+| `accounts[].name` | none | Your name for the account, used in commands and logs. Letters, digits, `.`, `_`, `-`. Receipts are kept per name, so renaming an account copies what is still in its folders again. |
 | `accounts[].email` | none | The Microsoft account's address. Signing in as anyone else is refused. |
 | `accounts[].clientId` | `microsoft.clientId` | A different app registration for this account. |
 | `accounts[].tenant` | `microsoft.tenant` | |
@@ -211,7 +211,9 @@ An invalid configuration exits with 2 and lists every problem at once.
 
 A poll never overlaps another. `run` waits for the poll to end before counting the interval, and a
 lease in the database stops a `once` from polling while another process with the same database is
-mid-poll. When stopped (SIGTERM, `docker stop`), it finishes the message it's on and exits.
+mid-poll. When stopped (SIGTERM, `docker stop`), it finishes the message it's on and exits. A poll cut
+short like that sends no heartbeat and doesn't count as a successful poll; the next one carries on
+where it stopped.
 
 ## Sign in
 
@@ -304,8 +306,8 @@ nothing there gets trained or purged by the provider's spam handling by accident
   container shows as unhealthy. Account failures don't make it 503, because restarting the
   container won't fix a login.
 - **Heartbeat.** Set `monitoring.heartbeatUrl` to a [healthchecks.io](https://healthchecks.io) check's
-  ping URL. After every poll, the service POSTs the summary to the URL when every account worked,
-  and to the URL plus `/fail` when one didn't. Set the check's period to your `pollInterval` and a
+  ping URL. After every poll that runs to the end, the service POSTs the summary to the URL when
+  every account worked, and to the URL plus `/fail` when one didn't. Set the check's period to your `pollInterval` and a
   grace time of an hour or so. healthchecks.io then alerts on a failed poll and on pings that stop
   coming, which covers a stopped container, a dead host and a login that needs renewing. Anything
   that accepts the same two URLs works, including a self-hosted healthchecks instance.

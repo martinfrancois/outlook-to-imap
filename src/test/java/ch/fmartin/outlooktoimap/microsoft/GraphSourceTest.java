@@ -24,6 +24,7 @@ import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
+import com.microsoft.kiota.http.middleware.options.RetryHandlerOption;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -34,6 +35,15 @@ class GraphSourceTest {
     @AfterEach
     void stop() {
         graph.close();
+    }
+
+    @Test
+    void retriesAreNotCutShortByAnOverallCallTimeout() {
+        // Retry-After can ask for minutes; the SDK's default 100 second call limit would cancel the wait.
+        okhttp3.OkHttpClient http = GraphSource.httpClient(new RetryHandlerOption(null, GraphSource.MAX_RETRIES, 3));
+
+        assertThat(http.callTimeoutMillis()).isZero();
+        assertThat(http.readTimeoutMillis()).isPositive();
     }
 
     @Test

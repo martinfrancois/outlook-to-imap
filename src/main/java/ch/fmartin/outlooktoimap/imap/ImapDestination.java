@@ -215,8 +215,15 @@ public final class ImapDestination implements DestinationConnection {
 
     /** The connection failed or broke; nothing else can go to this server in this poll. */
     public static final class DestinationUnavailableException extends DestinationException {
-        public DestinationUnavailableException(String name, Throwable cause) {
-            super("destination " + name + " is unavailable: " + cause.getMessage(), cause);
+        private final String destination;
+
+        public DestinationUnavailableException(String destination, Throwable cause) {
+            super("destination " + destination + " is unavailable: " + cause.getMessage(), cause);
+            this.destination = destination;
+        }
+
+        public String destination() {
+            return destination;
         }
     }
 }

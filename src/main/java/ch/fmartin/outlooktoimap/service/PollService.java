@@ -26,9 +26,12 @@ import org.slf4j.LoggerFactory;
 public final class PollService {
 
     private static final Logger LOG = LoggerFactory.getLogger(PollService.class);
-    // Renewed on a timer and after every message, so it only runs out when the holder died or hung.
+    // Renewed on a timer while the process lives, so it only runs out when the holder died. A hung
+    // poll keeps it; /health reports that case, because only messages count as progress there.
     private static final Duration LEASE = Duration.ofMinutes(15);
     private static final Duration LEASE_RENEWAL = LEASE.dividedBy(5);
+    // How long past two intervals /health waits for progress, to cover one slow message.
+    private static final Duration HEALTH_MARGIN = Duration.ofMinutes(15);
 
     private final Poller poller;
     private final Store store;
@@ -83,16 +86,24 @@ public final class PollService {
             }
         }, LEASE_RENEWAL.toMillis(), LEASE_RENEWAL.toMillis(), TimeUnit.MILLISECONDS);
         try {
+            // Renewing after each message as well notices a lost lease before the next upload,
+            // not up to one timer period later.
             PollReport report = poller.poll(false, plan, () -> stopping.get() || leaseLost.get(), () -> {
                 lastActivity.set(clock.instant());
                 renew.run();
             });
             lastFinished.set(clock.instant());
             lastActivity.set(clock.instant());
-            heartbeat.report(report);
+            if (report.interrupted()) {
+                // Neither a success nor a failure: the next poll finishes the work.
+                LOG.info("poll interrupted before every account was done; sending no heartbeat");
+            } else {
+                heartbeat.report(report);
+            }
             return Optional.of(report);
         } finally {
             renewals.shutdownNow();
+            awaitRenewals(renewals);
             store.releaseLease(holder);
         }
     }
@@ -141,12 +152,23 @@ public final class PollService {
         if (stopping.get() || executor == null || executor.isShutdown()) {
             return false;
         }
-        Duration allowed = interval.multipliedBy(2).plus(LEASE);
+        Duration allowed = interval.multipliedBy(2).plus(HEALTH_MARGIN);
         return Duration.between(lastActivity.get(), clock.instant()).compareTo(allowed) < 0;
     }
 
     public Instant lastFinished() {
         return lastFinished.get();
+    }
+
+    /** A renewal that is still running could otherwise take the lease back after the release. */
+    private static void awaitRenewals(ScheduledExecutorService renewals) {
+        try {
+            if (!renewals.awaitTermination(LEASE_RENEWAL.toMillis(), TimeUnit.MILLISECONDS)) {
+                LOG.warn("a poll lease renewal is still running; the lease may stay taken until it expires");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static String hostName() {
