@@ -94,6 +94,21 @@ class StoreTest {
         }
     }
 
+    @ParameterizedTest
+    @MethodSource("engines")
+    void aCutNeverSplitsACharacterThatTakesTwoJavaChars(Engine engine) {
+        // The emoji takes the column's last position and the one after it, so a cut at the column's
+        // length would keep only its first half.
+        String start = "<" + "x".repeat(Store.MAX_MESSAGE_ID_LENGTH - 2);
+        String longMessageId = start + "\uD83D\uDCE7@spam.example>";
+        try (Store store = Store.open(Databases.fresh(engine, directory))) {
+            store.savePending(new Receipt("hotmail", "m1", State.PENDING, "junkemail", "fastmail", "Outlook Junk",
+                    longMessageId, "a".repeat(64), 1234, null, T0, null, null, null));
+
+            assertThat(store.receipt("hotmail", "m1").get().internetMessageId()).isEqualTo(start);
+        }
+    }
+
     @Test
     void aNewSqliteDatabaseAndItsDirectoryAreReadableOnlyByTheirOwner() throws Exception {
         assumeTrue(PrivateFiles.supported());
