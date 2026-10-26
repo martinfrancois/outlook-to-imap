@@ -21,6 +21,7 @@ import ch.fmartin.outlooktoimap.microsoft.GraphSource.MessageGoneException;
 import ch.fmartin.outlooktoimap.microsoft.GraphSource.SourceMessage;
 import ch.fmartin.outlooktoimap.microsoft.GraphSource.ThrottledException;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
@@ -174,6 +175,17 @@ class GraphSourceTest {
 
         graph.server.verify(getRequestedFor(urlPathEqualTo("/v1.0/me/messages/m1/$value"))
                 .withHeader("Authorization", equalTo("Bearer secret-token")));
+    }
+
+    @Test
+    void sendsTheAccessTokenOnlyOverTheSchemeOfGraph() {
+        var tokens = GraphSource.tokenProvider(() -> "secret-token", GraphSource.DEFAULT_BASE_URL);
+
+        assertThat(tokens.getAuthorizationToken(URI.create("https://graph.microsoft.com/v1.0/me/messages"), Map.of()))
+                .isEqualTo("secret-token");
+        // A delta link stored with http:// would otherwise carry the token in clear text.
+        assertThat(tokens.getAuthorizationToken(URI.create("http://graph.microsoft.com/v1.0/me/messages"), Map.of())).isEmpty();
+        assertThat(tokens.getAuthorizationToken(URI.create("https://graph.example/v1.0/me/messages"), Map.of())).isEmpty();
     }
 
     private void stubThrottledOnce(String header, String value) {
