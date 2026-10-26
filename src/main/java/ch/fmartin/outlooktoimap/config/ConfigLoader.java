@@ -9,6 +9,7 @@ import ch.fmartin.outlooktoimap.config.Config.Monitoring;
 import ch.fmartin.outlooktoimap.config.Config.Security;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -119,11 +120,15 @@ public final class ConfigLoader {
 
         private Monitoring monitoring(RawMonitoring raw) {
             if (raw == null) {
-                return new Monitoring(Monitoring.DEFAULT_HEALTH_PORT, null);
+                return new Monitoring(Monitoring.DEFAULT_HEALTH_PORT, Monitoring.DEFAULT_HEALTH_BIND_ADDRESS, null);
             }
             int port = raw.healthPort() == null ? Monitoring.DEFAULT_HEALTH_PORT : raw.healthPort();
             if (port < 0 || port > 65535) {
                 errors.add("monitoring.healthPort must be between 0 and 65535, got " + port);
+            }
+            String bindAddress = raw.healthBindAddress() == null ? Monitoring.DEFAULT_HEALTH_BIND_ADDRESS : raw.healthBindAddress().strip();
+            if (!isHost(bindAddress)) {
+                errors.add("monitoring.healthBindAddress must be a host name or IP address, got \"" + raw.healthBindAddress() + "\"");
             }
             String heartbeat = blankToNull(raw.heartbeatUrl());
             if (heartbeat != null) {
@@ -132,7 +137,7 @@ public final class ConfigLoader {
                     errors.add("monitoring.heartbeatUrl must be an http or https URL");
                 }
             }
-            return new Monitoring(port, heartbeat);
+            return new Monitoring(port, bindAddress, heartbeat);
         }
 
         private Map<String, Destination> destinations(Map<String, RawDestination> raw) {
@@ -247,6 +252,16 @@ public final class ConfigLoader {
             return baseDirectory.resolve(value).normalize();
         }
 
+        /** A host name, an IPv4 address or an IPv6 address with or without brackets, as URIs accept them. */
+        private static boolean isHost(String value) {
+            String host = value.contains(":") && !value.startsWith("[") ? "[" + value + "]" : value;
+            try {
+                return host.equals(new URI("http://" + host).getHost());
+            } catch (URISyntaxException e) {
+                return false;
+            }
+        }
+
         private static String scheme(String url) {
             try {
                 return URI.create(url).getScheme();
@@ -273,7 +288,7 @@ public final class ConfigLoader {
 
     record RawDatabase(String url, String username, String passwordFile) {}
 
-    record RawMonitoring(Integer healthPort, String heartbeatUrl) {}
+    record RawMonitoring(Integer healthPort, String healthBindAddress, String heartbeatUrl) {}
 
     record RawDestination(String host, Integer port, Security security, String username, String passwordFile) {}
 

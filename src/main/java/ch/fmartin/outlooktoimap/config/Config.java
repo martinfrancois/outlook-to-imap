@@ -1,5 +1,6 @@
 package ch.fmartin.outlooktoimap.config;
 
+import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -39,8 +40,20 @@ public record Config(
         }
     }
 
-    public record Monitoring(int healthPort, String heartbeatUrl) {
+    public record Monitoring(int healthPort, String healthBindAddress, String heartbeatUrl) {
         public static final int DEFAULT_HEALTH_PORT = 8080;
+        // /health has no authentication, so only the host itself reaches it unless the owner opens it.
+        public static final String DEFAULT_HEALTH_BIND_ADDRESS = "127.0.0.1";
+
+        /** The address /health listens on, with a host name looked up. */
+        public InetSocketAddress healthAddress() {
+            InetSocketAddress address = new InetSocketAddress(healthBindAddress, healthPort);
+            if (address.isUnresolved()) {
+                throw new ConfigException(List.of(
+                        "monitoring.healthBindAddress \"" + healthBindAddress + "\" does not resolve to an IP address"));
+            }
+            return address;
+        }
     }
 
     public enum Security {

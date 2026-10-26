@@ -70,6 +70,15 @@ class MainTest {
     }
 
     @Test
+    void aHealthBindAddressThatDoesNotResolveIsAConfigurationError() throws Exception {
+        Files.writeString(config, Files.readString(config)
+                .replace("healthPort: 0", "healthPort: 8080\n  healthBindAddress: outlook-to-imap.invalid"));
+
+        assertThat(run("--config", config.toString(), "run")).isEqualTo(Main.EXIT_CONFIG);
+        assertThat(err.toString()).contains("monitoring.healthBindAddress \"outlook-to-imap.invalid\" does not resolve");
+    }
+
+    @Test
     void authorizeNeedsAConfiguredAccount() {
         assertThat(run("--config", config.toString(), "authorize", "nobody")).isEqualTo(2);
         assertThat(err.toString()).contains("no account named nobody").contains("[hotmail]");

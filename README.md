@@ -110,6 +110,7 @@ accounts:
 | `database.username` | none | PostgreSQL user. |
 | `database.passwordFile` | none | File holding the PostgreSQL password. |
 | `monitoring.healthPort` | `8080` | Port of `GET /health` while `run` is active. `0` turns it off. |
+| `monitoring.healthBindAddress` | `127.0.0.1` | Address `/health` listens on. The default answers only the same host, or in a container only the container itself. Set `0.0.0.0` when a published port, another container, a Kubernetes probe or a remote monitor checks it, see [Monitoring](#monitoring). |
 | `monitoring.heartbeatUrl` | none | A healthchecks.io-style ping URL, see [Monitoring](#monitoring). |
 | `destinations.<name>.host` | none | IMAP server. |
 | `destinations.<name>.port` | `993` for `tls`, `143` for `starttls` | |
@@ -383,6 +384,25 @@ nothing there gets trained or purged by the provider's spam handling by accident
   check (`--health-cmd`, or `healthcheck:` in Compose) or turn it off (`--no-healthcheck`), or the
   container shows as unhealthy. Account failures don't make it 503, because restarting the
   container won't fix a login.
+
+  `/health` has no authentication, and its body names each account and its last error, which can
+  hold file paths and IMAP server replies. It listens on `127.0.0.1` by default, so only the same
+  host reaches it, and in a container only the container itself, which is where the `HEALTHCHECK`
+  runs. Anything that connects from elsewhere needs `monitoring.healthBindAddress: 0.0.0.0`:
+
+  - a published port (`-p` or `ports:`). Publish it on `127.0.0.1` of the host, as
+    [`examples/compose.yaml`](examples/compose.yaml) shows;
+  - another container on the same Docker or Compose network;
+  - a Kubernetes `httpGet` probe, because the kubelet connects to the pod's IP;
+  - a monitor on another machine that checks a jar.
+
+  With `0.0.0.0`, a jar running outside a container answers anyone who can reach the host.
+
+  Version 1.0.0 listened on every interface. After the upgrade, each of the cases above gets no
+  answer until the setup sets `monitoring.healthBindAddress: 0.0.0.0`. A Kubernetes liveness probe
+  that gets no answer restarts the container again and again. The image's `HEALTHCHECK` calls
+  `127.0.0.1`, so in the image keep `127.0.0.1` or `0.0.0.0`. An address that doesn't accept
+  connections to `127.0.0.1`, such as `::1` or the container's own IP, makes the check fail.
 - **Heartbeat.** Set `monitoring.heartbeatUrl` to a [healthchecks.io](https://healthchecks.io) check's
   ping URL. After every poll that runs to the end, the service POSTs the summary to the URL when
   every account worked, and to the URL plus `/fail` when one didn't. Set the check's period to your `pollInterval` and a

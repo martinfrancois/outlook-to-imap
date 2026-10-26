@@ -29,11 +29,11 @@ public final class HealthServer implements AutoCloseable {
     /** The body of every reply. {@code error} is set only when the status could not be read. */
     record Health(String status, Instant lastPollFinishedAt, List<AccountStatus> accounts, String error) {}
 
-    public HealthServer(int port, PollService service, Store store) {
+    public HealthServer(InetSocketAddress address, PollService service, Store store) {
         try {
-            server = HttpServer.create(new InetSocketAddress(port), 0);
+            server = HttpServer.create(address, 0);
         } catch (IOException e) {
-            throw new UncheckedIOException("cannot listen on port " + port + " for /health", e);
+            throw new UncheckedIOException("cannot listen on " + address + " for /health", e);
         }
         server.createContext("/health", exchange -> {
             try (exchange) {

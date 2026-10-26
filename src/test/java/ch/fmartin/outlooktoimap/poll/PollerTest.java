@@ -51,6 +51,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class PollerTest {
 
     private static final String JUNK = "Outlook Junk";
+    private static final Monitoring MONITORING = new Monitoring(0, Monitoring.DEFAULT_HEALTH_BIND_ADDRESS, null);
 
     private final FakeGraph graph = new FakeGraph();
     private final FakeImap fastmail = new FakeImap();
@@ -264,7 +265,7 @@ class PollerTest {
             Account moved = new Account("hotmail", "hotmail@hotmail.test", "app", "consumers",
                     List.of(new FolderMapping("junkemail", "dovecot", JUNK, false)));
             Config config = new Config(new Microsoft("app", "consumers"), directory, database, Duration.ofHours(1),
-                    new Monitoring(0, null), Map.of("dovecot", dovecot.destination("dovecot", directory)), List.of(moved));
+                    MONITORING, Map.of("dovecot", dovecot.destination("dovecot", directory)), List.of(moved));
 
             PollReport report = poll(config, dovecot::connect);
 
@@ -426,7 +427,7 @@ class PollerTest {
             destinations.put("fastmail", fastmail.destination("fastmail", directory));
             destinations.put("dovecot", other.destination("dovecot", directory));
             Config config = new Config(new Microsoft("app", "consumers"), directory, database, Duration.ofHours(1),
-                    new Monitoring(0, null), destinations, List.of(account));
+                    MONITORING, destinations, List.of(account));
 
             PollReport report = new Poller(config, store, a -> "token", a -> graph.source(),
                     d -> (d.name().equals("fastmail") ? fastmail : other).connect(d), Clock.systemUTC())
@@ -492,7 +493,7 @@ class PollerTest {
             destinations.put("fastmail", fastmail.destination("fastmail", directory));
             destinations.put("dovecot", dovecot.destination("dovecot", directory));
             Config config = new Config(new Microsoft("app", "consumers"), directory, database, Duration.ofHours(1),
-                    new Monitoring(0, null), destinations, List.of(moved));
+                    MONITORING, destinations, List.of(moved));
 
             PollReport report = poll(config, d -> {
                 if (d.name().equals("fastmail")) {
@@ -537,7 +538,7 @@ class PollerTest {
 
     private Config config(Account... accounts) {
         return new Config(new Microsoft("app", "consumers"), directory, database, Duration.ofHours(1),
-                new Monitoring(0, null), Map.of("fastmail", fastmail.destination("fastmail", directory)), List.of(accounts));
+                MONITORING, Map.of("fastmail", fastmail.destination("fastmail", directory)), List.of(accounts));
     }
 
     private PollReport poll(Config config) {

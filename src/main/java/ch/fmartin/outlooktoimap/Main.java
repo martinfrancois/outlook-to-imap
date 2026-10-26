@@ -94,7 +94,7 @@ public final class Main {
             PollService service = service(config, store);
             HealthServer health = config.monitoring().healthPort() == 0
                     ? null
-                    : new HealthServer(config.monitoring().healthPort(), service, store);
+                    : new HealthServer(config.monitoring().healthAddress(), service, store);
             CountDownLatch stopped = new CountDownLatch(1);
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 service.stop(SHUTDOWN_GRACE);

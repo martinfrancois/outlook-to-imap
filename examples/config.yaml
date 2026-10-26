@@ -9,6 +9,10 @@ microsoft:
 pollInterval: PT1H
 
 monitoring:
+  # /health listens on 127.0.0.1:8080 and has no authentication. Set the address to 0.0.0.0 when
+  # a published port, another container, a Kubernetes httpGet probe or a monitor on another
+  # machine checks it. Publish the port only on 127.0.0.1 of the host.
+  # healthBindAddress: 0.0.0.0
   # Optional: a healthchecks.io ping URL. Pinged after every poll, with /fail when an account failed.
   # heartbeatUrl: https://hc-ping.com/your-check-uuid
 
