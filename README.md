@@ -140,7 +140,10 @@ mkdir -p outlook-to-imap/secrets && cd outlook-to-imap
 # write config.yaml, see Configuration
 # Save the app password as plain text in secrets/fastmail-app-password using your editor.
 # Do not put the password in a shell command, where shell history could save it.
-chmod 600 secrets/fastmail-app-password
+chmod 700 secrets
+chmod 600 config.yaml secrets/fastmail-app-password
+# The image runs as uid 10001 and must read the config and traverse the secrets directory.
+sudo chown -R 10001 config.yaml secrets
 
 docker volume create outlook-to-imap-data
 
@@ -164,16 +167,17 @@ docker compose run --rm outlook-to-imap authorize hotmail
 docker compose up -d
 ```
 
-The image runs as user `outlook-to-imap` (uid 10001), not root, and the secret files must be
-readable by that user. Keep them mode 600 and give them to that uid with
-`sudo chown 10001 secrets/*`.
+The image runs as user `outlook-to-imap` (uid 10001), not root. The ownership setup above gives it
+the configuration, the secrets directory and its files while keeping them private. Do this before
+the first `authorize` command. You may need `sudo` to edit those host files afterward. For a jar
+running as your own user, keep their ownership unchanged.
 
 ### Podman
 
 The same commands work with `podman` in place of `docker`. On SELinux hosts such as Fedora, add
 `:Z` to bind mounts, for example `-v "$PWD/config.yaml:/config/config.yaml:ro,Z"`. Rootless
-Podman maps uid 10001 into your user namespace, so make the secrets readable with
-`podman unshare chown 10001 secrets/*`.
+Podman maps uid 10001 into your user namespace. In the setup above, replace the `sudo chown` command
+with `podman unshare chown -R 10001 config.yaml secrets` before the first `authorize` command.
 
 ```bash
 podman run --rm -it \
