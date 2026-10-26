@@ -1,0 +1,191 @@
+package ch.fmartin.outlooktoimap.service;
+
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.containing;
+import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import ch.fmartin.outlooktoimap.Databases;
+import ch.fmartin.outlooktoimap.Databases.Engine;
+import ch.fmartin.outlooktoimap.FakeGraph;
+import ch.fmartin.outlooktoimap.FakeGraph.Item;
+import ch.fmartin.outlooktoimap.FakeImap;
+import ch.fmartin.outlooktoimap.TestMessages;
+import ch.fmartin.outlooktoimap.config.Config;
+import ch.fmartin.outlooktoimap.config.Config.Account;
+import ch.fmartin.outlooktoimap.config.Config.FolderMapping;
+import ch.fmartin.outlooktoimap.config.Config.Microsoft;
+import ch.fmartin.outlooktoimap.config.Config.Monitoring;
+import ch.fmartin.outlooktoimap.microsoft.AccessTokens;
+import ch.fmartin.outlooktoimap.microsoft.ReauthorizationRequiredException;
+import ch.fmartin.outlooktoimap.store.Store;
+import ch.fmartin.outlooktoimap.sync.RunReport;
+import ch.fmartin.outlooktoimap.sync.Synchronizer;
+import com.github.tomakehurst.wiremock.WireMockServer;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class PollServiceTest {
+
+    private final FakeGraph graph = new FakeGraph();
+    private final FakeImap fastmail = new FakeImap();
+    private final WireMockServer healthchecks = new WireMockServer(options().dynamicPort());
+    private final MutableClock clock = new MutableClock(Instant.parse("2026-10-26T10:00:00Z"));
+
+    @TempDir
+    Path directory;
+
+    private Store store;
+    private Config config;
+
+    @BeforeEach
+    void setUp() {
+        healthchecks.start();
+        healthchecks.stubFor(post(urlPathEqualTo("/ping")).willReturn(aResponse().withStatus(200)));
+        healthchecks.stubFor(post(urlPathEqualTo("/ping/fail")).willReturn(aResponse().withStatus(200)));
+        store = Store.open(Databases.fresh(Engine.SQLITE, directory));
+        config = new Config(new Microsoft("app", "consumers"), directory, null, Duration.ofHours(1), new Monitoring(0, null),
+                Map.of("fastmail", fastmail.destination("fastmail", directory)),
+                List.of(new Account("hotmail", "me@hotmail.test", "app", "consumers",
+                        List.of(new FolderMapping("junkemail", "fastmail", "Outlook Junk", false)))));
+        graph.mime("m1", TestMessages.mime("m1"));
+        graph.deltaRound("junkemail", null, "t1", List.of(List.of(Item.of("m1"))));
+    }
+
+    @AfterEach
+    void tearDown() {
+        store.close();
+        graph.close();
+        fastmail.close();
+        healthchecks.stop();
+    }
+
+    @Test
+    void aSuccessfulPollPingsTheHeartbeat() {
+        Optional<RunReport> report = service(a -> "token").pollOnce(false, line -> {});
+
+        assertThat(report).get().extracting(RunReport::succeeded).isEqualTo(true);
+        healthchecks.verify(1, postRequestedFor(urlPathEqualTo("/ping")).withRequestBody(containing("hotmail: 1 imported")));
+        healthchecks.verify(0, postRequestedFor(urlPathEqualTo("/ping/fail")));
+    }
+
+    @Test
+    void aFailedAccountPingsTheFailureUrlWithTheReason() {
+        AccessTokens revoked = a -> {
+            throw new ReauthorizationRequiredException(a.name(), "Microsoft refused the saved login", null);
+        };
+
+        service(revoked).pollOnce(false, line -> {});
+
+        healthchecks.verify(1, postRequestedFor(urlPathEqualTo("/ping/fail"))
+                .withRequestBody(containing("outlook-to-imap authorize hotmail")));
+    }
+
+    @Test
+    void doesNotPollWhileAnotherProcessHoldsTheLease() {
+        assertThat(store.acquireLease("other-host/1", clock.instant(), clock.instant().plusSeconds(900))).isTrue();
+
+        assertThat(service(a -> "token").pollOnce(false, line -> {})).isEmpty();
+        assertThat(fastmail.messages("Outlook Junk")).isEmpty();
+
+        // The other process died and its lease ran out.
+        clock.advance(Duration.ofMinutes(16));
+        assertThat(service(a -> "token").pollOnce(false, line -> {})).isPresent();
+        assertThat(fastmail.messages("Outlook Junk")).hasSize(1);
+    }
+
+    @Test
+    void aDryRunIgnoresTheLeaseBecauseItWritesNothing() {
+        store.acquireLease("other-host/1", clock.instant(), clock.instant().plusSeconds(900));
+
+        assertThat(service(a -> "token").pollOnce(true, line -> {})).isPresent();
+        healthchecks.verify(0, postRequestedFor(urlPathEqualTo("/ping")));
+    }
+
+    @Test
+    void healthFollowsPollProgressAndTheEndpointShowsEachAccount() throws Exception {
+        PollService service = service(a -> "token");
+        assertThat(service.healthy()).isFalse();
+
+        service.start();
+        try (HealthServer health = new HealthServer(0, service, store)) {
+            waitFor(() -> service.lastFinished() != null);
+            HttpResponse<String> response = get(health);
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(response.body()).contains("\"status\":\"up\"").contains("\"account\":\"hotmail\"").contains("\"imported\":1");
+
+            // Two intervals plus the lease margin without progress means the poll loop is stuck.
+            clock.advance(Duration.ofHours(2).plusMinutes(16));
+            assertThat(service.healthy()).isFalse();
+            assertThat(get(health).statusCode()).isEqualTo(503);
+        } finally {
+            service.stop(Duration.ofSeconds(10));
+        }
+        assertThat(service.healthy()).isFalse();
+    }
+
+    private PollService service(AccessTokens tokens) {
+        Synchronizer synchronizer = new Synchronizer(config, store, tokens, a -> graph.mailbox(), fastmail::connect, clock);
+        return new PollService(synchronizer, store, new Heartbeat(healthchecks.baseUrl() + "/ping"), config.pollInterval(), clock);
+    }
+
+    private static HttpResponse<String> get(HealthServer health) throws Exception {
+        return HttpClient.newHttpClient().send(
+                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + health.port() + "/health")).build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static void waitFor(java.util.function.BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("condition not met within 30 seconds");
+            }
+            Thread.sleep(20);
+        }
+    }
+
+    private static final class MutableClock extends Clock {
+        private volatile Instant now;
+
+        MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        void advance(Duration duration) {
+            now = now.plus(duration);
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+
+        @Override
+        public ZoneOffset getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+    }
+}

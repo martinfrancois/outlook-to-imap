@@ -1,0 +1,18 @@
+# docker compose up -d   or   podman compose up -d
+# Expects config.yaml and secrets/ next to this file.
+services:
+  outlook-to-imap:
+    image: ghcr.io/martinfrancois/outlook-to-imap:1
+    restart: unless-stopped
+    # The service finishes the message it is on when stopped; give it the time to.
+    stop_grace_period: 30s
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - ./secrets:/config/secrets:ro
+      - outlook-to-imap-data:/data
+    # Uncomment to reach /health from the host.
+    # ports:
+    #   - "127.0.0.1:8080:8080"
+
+volumes:
+  outlook-to-imap-data:
