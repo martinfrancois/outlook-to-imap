@@ -28,6 +28,7 @@ public final class HealthServer implements AutoCloseable {
 
     // Seconds a client may take to send its request or read the reply. The JDK reads both once, when
     // it creates its first server, and without them a stalled client holds its connection forever.
+    // docs/adr/0024-a-virtual-thread-per-health-request-and-jdk-time-limits.md
     static final int CLIENT_TIMEOUT_SECONDS = 10;
 
     static {
@@ -57,6 +58,7 @@ public final class HealthServer implements AutoCloseable {
         // Without an executor the server reads every request on its one dispatcher thread, so a
         // client that stops mid-request blocks all others. Virtual threads are daemon threads, and
         // unlike a fixed pool a few slow clients cannot use them all up.
+        // docs/adr/0024-a-virtual-thread-per-health-request-and-jdk-time-limits.md
         executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("health-", 0).factory());
         server.setExecutor(executor);
         server.createContext("/health", exchange -> {
