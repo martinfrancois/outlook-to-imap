@@ -18,8 +18,10 @@ concurrency:
 
 jobs:
   # The Java versions to test come from endoflife.date, so a new LTS joins the matrix on the day
-  # it ships without a change here. Only LTS releases from 21 upward count: 21 is
-  # maven.compiler.release in pom.xml and the minimum the README promises.
+  # it ships without a change here. Only LTS releases from the lowest committed version upward
+  # count, which must be maven.compiler.release in pom.xml and the minimum the README promises.
+  # The site's answer is added to the committed list, so a wrong or tampered reply can add
+  # versions but never drop one.
   lts:
     name: lts
     runs-on: ubuntu-latest
@@ -27,17 +29,23 @@ jobs:
     outputs:
       versions: ${{ steps.pick.outputs.versions }}
     steps:
-      - name: List current Java LTS versions from 21 upward
+      - name: List current Java LTS versions
         id: pick
         run: |
-          fallback='["21","25"]'
-          versions=$(curl -fsS --max-time 20 https://endoflife.date/api/eclipse-temurin.json \
-            | jq -c '[.[] | select(.lts != false) | .cycle | select((tonumber? // 0) >= 21)] | sort_by(tonumber)') \
-            || versions=''
-          if [ -z "$versions" ] || [ "$versions" = '[]' ]; then
-            echo "::warning::endoflife.date gave no usable answer, testing the committed list $fallback instead"
-            versions=$fallback
+          committed='["21","25"]'
+          site=$(curl -fsS --max-time 20 https://endoflife.date/api/eclipse-temurin.json \
+            | jq -c --argjson committed "$committed" '($committed | map(tonumber) | min) as $floor
+                | [.[] | select(.lts != false) | .cycle | tostring | select(test("^[0-9]+$"))
+                  | tonumber | select(. >= $floor) | tostring]') \
+            || site=''
+          if [ -z "$site" ] || [ "$site" = '[]' ]; then
+            echo "::warning::endoflife.date gave no usable answer, testing the committed list $committed only"
+            site='[]'
           fi
+          # Every entry goes through tonumber, so "021" and "21" become one "21" and a committed
+          # version always survives.
+          versions=$(jq -cn --argjson site "$site" --argjson committed "$committed" \
+            '$site + $committed | map(tonumber) | unique | map(tostring)')
           echo "Testing Java $versions"
           echo "versions=$versions" >> "$GITHUB_OUTPUT"
 
