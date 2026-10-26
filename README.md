@@ -409,6 +409,9 @@ nothing there gets trained or purged by the provider's spam handling by accident
   grace time of an hour or so. healthchecks.io then alerts on a failed poll and on pings that stop
   coming, which covers a stopped container, a dead host and a login that needs renewing. Anything
   that accepts the same two URLs works, including a self-hosted healthchecks instance.
+  The POST body is the poll summary: each account's name, counts and error text, which can hold
+  file paths, IMAP server replies and Graph error codes, but never message content. Use an
+  `https` ping URL so nobody on the way can read it.
 - **`status`** prints the same per-account information on the command line.
 - **Logs** go to standard output: one line per poll per account with imported, removed, skipped and
   failed counts, and one line per failure. Tokens, passwords and message content never appear in
