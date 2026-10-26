@@ -94,8 +94,8 @@ Stopping (`Main`):
 `doesNotPollWhileAnotherProcessHoldsTheLease`, `aPollThatLosesTheLeaseStopsBeforeTheNextMessage`,
 `aDryRunIgnoresTheLeaseBecauseItCopiesAndRemovesNothing`,
 `aServiceThatFindsTheLeaseTakenTriesAgainBeforeTheNextInterval`,
-`aStopDuringASinglePollReleasesTheLeaseWhenTheGraceRunsOut` and
-`aStopThatOutlastsItsGraceReleasesTheLeaseForTheNextStart`. For interrupted polls:
+`aStopThatOutlastsItsGraceDuringASinglePollKeepsTheLeaseUntilThePollEnds` and
+`aStopThatOutlastsItsGraceKeepsTheLeaseWhileTheUploadHangs`. For interrupted polls:
 `PollerTest.aStopRequestEndsThePollAtAMessageBoundaryAndKeepsTheCheckpoint` and
 `StoreTest.aFailedPollKeepsTheLastSuccess`. The exit codes are constants in `Main`. In
 `PollService`, `LEASE` is 15 minutes and `LEASE_RENEWAL` is a fifth of it.
