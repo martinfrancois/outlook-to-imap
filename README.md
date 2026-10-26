@@ -157,6 +157,7 @@ docker run --rm -it \
 
 # Run as a service
 docker run -d --name outlook-to-imap --restart unless-stopped --stop-timeout 30 \
+  --read-only --tmpfs /tmp:exec --cap-drop ALL --security-opt no-new-privileges \
   -v "$PWD/config.yaml:/config/config.yaml:ro" -v "$PWD/secrets:/config/secrets:ro" \
   -v outlook-to-imap-data:/data \
   ghcr.io/martinfrancois/outlook-to-imap:1
@@ -168,6 +169,13 @@ Or with Compose, using [`examples/compose.yaml`](examples/compose.yaml):
 docker compose run --rm outlook-to-imap authorize hotmail
 docker compose up -d
 ```
+
+The service command also limits what a compromised process could do. `--read-only` makes the
+image's files read-only, `--cap-drop ALL` removes every Linux capability, and
+`--security-opt no-new-privileges` keeps any program in the container from gaining privileges. The
+service writes only to `/data` and `/tmp`. `/tmp` needs `exec`, because the SQLite driver unpacks
+its native library there and loads it, and Docker mounts a `--tmpfs` with `noexec` unless told
+otherwise. `examples/compose.yaml` sets the same options.
 
 The image runs as user `outlook-to-imap` (uid 10001), not root. The ownership setup above gives it
 the configuration, the secrets directory and its files while keeping them private. Do this before
@@ -188,6 +196,7 @@ podman run --rm -it \
   ghcr.io/martinfrancois/outlook-to-imap:1 authorize hotmail
 
 podman run -d --name outlook-to-imap --restart unless-stopped --stop-timeout 30 \
+  --read-only --tmpfs /tmp:exec --cap-drop ALL --security-opt no-new-privileges \
   -v "$PWD/config.yaml:/config/config.yaml:ro,Z" -v "$PWD/secrets:/config/secrets:ro,Z" \
   -v outlook-to-imap-data:/data \
   ghcr.io/martinfrancois/outlook-to-imap:1
