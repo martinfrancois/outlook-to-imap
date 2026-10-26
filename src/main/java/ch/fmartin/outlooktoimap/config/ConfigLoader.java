@@ -141,11 +141,13 @@ public final class ConfigLoader {
                 errors.add("destinations must name at least one IMAP server");
                 return destinations;
             }
-            raw.forEach((name, d) -> {
+            for (Map.Entry<String, RawDestination> entry : raw.entrySet()) {
+                String name = entry.getKey();
+                RawDestination d = entry.getValue();
                 String where = "destinations." + name;
                 if (d == null) {
                     errors.add(where + " is empty");
-                    return;
+                    continue;
                 }
                 Security security = d.security() == null ? Security.TLS : d.security();
                 int port = d.port() == null ? (security == Security.TLS ? 993 : 143) : d.port();
@@ -158,7 +160,7 @@ public final class ConfigLoader {
                         ? missing(where + ".passwordFile")
                         : readableFile(where + ".passwordFile", d.passwordFile());
                 destinations.put(name, new Destination(name, d.host(), port, security, d.username(), passwordFile));
-            });
+            }
             return destinations;
         }
 

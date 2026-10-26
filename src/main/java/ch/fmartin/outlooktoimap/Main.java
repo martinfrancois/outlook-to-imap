@@ -131,8 +131,9 @@ public final class Main {
             if (report.isEmpty()) {
                 return EXIT_BUSY;
             }
-            out.println(report.get().summary());
-            return report.get().succeeded() ? 0 : EXIT_ACCOUNT_FAILED;
+            PollReport finished = report.get();
+            out.println(finished.summary());
+            return finished.succeeded() ? 0 : EXIT_ACCOUNT_FAILED;
         }
     }
 
@@ -143,19 +144,20 @@ public final class Main {
             List<AccountStatus> statuses = store.statuses();
             PrintWriter out = spec.commandLine().getOut();
             for (Account account : config.accounts()) {
-                Optional<AccountStatus> status = statuses.stream().filter(s -> s.account().equals(account.name())).findFirst();
-                if (status.isEmpty()) {
-                    out.println(account.name() + ": never polled");
-                    continue;
-                }
-                AccountStatus s = status.get();
-                out.println(account.name() + ": last success " + (s.lastSuccessAt() == null ? "never" : s.lastSuccessAt())
-                        + ", last attempt " + s.lastAttemptAt() + ", last poll " + s.counts());
-                if (s.lastError() != null) {
-                    out.println("  error: " + s.lastError());
-                }
+                statuses.stream()
+                        .filter(s -> s.account().equals(account.name()))
+                        .findFirst()
+                        .ifPresentOrElse(s -> printStatus(out, account, s), () -> out.println(account.name() + ": never polled"));
             }
             return 0;
+        }
+    }
+
+    private static void printStatus(PrintWriter out, Account account, AccountStatus s) {
+        out.println(account.name() + ": last success " + (s.lastSuccessAt() == null ? "never" : s.lastSuccessAt())
+                + ", last attempt " + s.lastAttemptAt() + ", last poll " + s.counts());
+        if (s.lastError() != null) {
+            out.println("  error: " + s.lastError());
         }
     }
 
