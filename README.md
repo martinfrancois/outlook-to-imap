@@ -128,7 +128,10 @@ accounts:
 
 Passwords and tokens never go in this file. It still contains your email addresses and folder
 names, so remove those before sharing it. Keep the password files and the state directory out of
-Git and shared or cloud-synced folders.
+Git and shared or cloud-synced folders. Each password file should be readable only by its owner
+(mode 600). When group or other users can read one, the service logs a warning at start with the
+`chmod` command that fixes it, and carries on, because Docker swarm and Kubernetes mount secrets
+readable by everyone in the container by default.
 
 ## Run it
 
