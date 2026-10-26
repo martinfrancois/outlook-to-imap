@@ -202,12 +202,14 @@ to `data` next to the configuration file.
 | Command | What it does | Exit code |
 | --- | --- | --- |
 | `authorize <account>` | Signs one account in, see [Sign in](#sign-in). | 0 when saved |
-| `run` | Polls right away, then once per `pollInterval`, until stopped. The image runs this by default. | 0 after a stop |
+| `run` | Polls right away, then once per `pollInterval`, until stopped. The image runs this by default. | 143 after SIGTERM (`docker stop`), 130 after Ctrl-C |
 | `once` | Polls every account once and exits. For a manual check, a test, or an external scheduler such as a Kubernetes CronJob. | 0 all accounts fine, 1 an account failed, 3 another process was polling |
 | `once --dry-run` | Lists what a poll would copy and remove, and does neither. It records no receipts and moves no checkpoint, but it signs in, which saves the refreshed login, and it creates the database on first use. | as `once` |
 | `status` | Prints each account's last successful poll, last attempt, counts and last error. | 0 |
 
-An invalid configuration exits with 2 and lists every problem at once.
+An invalid configuration exits with 2 and lists every problem at once. Any command stopped by a
+signal exits with 128 plus the signal's number, as other programs do: 143 for SIGTERM, 130 for
+Ctrl-C.
 
 A poll never overlaps another. `run` waits for the poll to end before counting the interval, and a
 lease in the database stops a `once` from polling while another process with the same database is
