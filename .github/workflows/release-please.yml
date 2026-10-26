@@ -50,7 +50,7 @@ jobs:
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: "25.0.5+8.0.LTS"
           cache: maven
 
       # The full build again, on the tagged commit, so the jar that ships is one that passed.
