@@ -71,13 +71,24 @@ public final class GraphSource {
 
     /** Lets tests point the client at a local server and shorten the retry delays. */
     public GraphSource(Supplier<String> accessToken, String baseUrl, RetryHandlerOption retry) {
-        String host = URI.create(baseUrl).getHost();
-        AccessTokenProvider tokens = new AccessTokenProvider() {
-            private final AllowedHostsValidator hosts = new AllowedHostsValidator(host);
+        this.client = new GraphServiceClient(new BaseBearerTokenAuthenticationProvider(tokenProvider(accessToken, baseUrl)),
+                httpClient(retry));
+        this.client.getRequestAdapter().setBaseUrl(baseUrl);
+    }
+
+    /**
+     * Hands out the token only for requests to the host and scheme of {@code baseUrl}. Next links
+     * and stored delta links pass through here too.
+     */
+    static AccessTokenProvider tokenProvider(Supplier<String> accessToken, String baseUrl) {
+        URI base = URI.create(baseUrl);
+        return new AccessTokenProvider() {
+            private final AllowedHostsValidator hosts = new AllowedHostsValidator(base.getHost());
 
             @Override
             public String getAuthorizationToken(URI uri, Map<String, Object> context) {
-                return hosts.isUrlHostValid(uri) ? accessToken.get() : "";
+                // The validator compares hosts only, so an http:// link to Graph would pass it.
+                return hosts.isUrlHostValid(uri) && base.getScheme().equalsIgnoreCase(uri.getScheme()) ? accessToken.get() : "";
             }
 
             @Override
@@ -85,8 +96,6 @@ public final class GraphSource {
                 return hosts;
             }
         };
-        this.client = new GraphServiceClient(new BaseBearerTokenAuthenticationProvider(tokens), httpClient(retry));
-        this.client.getRequestAdapter().setBaseUrl(baseUrl);
     }
 
     /**
