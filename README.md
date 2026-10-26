@@ -470,6 +470,19 @@ exactly the bytes being sent.
   next poll sees the failed message again; the messages that worked are skipped by their receipts.
 - **One folder or account failing** doesn't stop the others either. That includes an account
   that needs a new login, and one that Microsoft keeps throttling.
+- **A source folder renamed, moved or deleted in Outlook** fails its folder mapping with an error
+  that names the source. A path whose folders no longer lead there fails while the poll looks it
+  up, with `Projects/2026: no folder named "2026" on the way to Projects/2026; correct or remove
+  this source under accounts[].folders[] in the configuration`. When Graph answers that a folder it
+  was asked about no longer exists, for example one deleted while the poll reads it, the error is
+  `Projects/2026: Microsoft says this folder no longer exists. If it was renamed, moved or deleted,
+  correct or remove this source under accounts[].folders[] in the configuration`. A well-known name
+  such as `junkemail` needs no lookup, so it can only fail with this second message.
+- **A source folder gone for good**, for example emptied out of Deleted Items, makes Graph answer
+  "not found" for the folder's saved position. The poll then reads whatever folder has the
+  configured name now from the start, and the receipts skip what was already copied. A folder
+  deleted and created again under the same name is not picked up yet, see
+  [outlook-to-imap issue #34](https://github.com/martinfrancois/outlook-to-imap/issues/34).
 - **Throttling.** Each request is retried up to 5 times. Every retry waits as long as Microsoft's
   `Retry-After` asks, or backs off exponentially without one, but never more than 180 seconds,
   the Graph SDK's limit. A mailbox still throttled after that is skipped until the next poll.

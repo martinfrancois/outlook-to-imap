@@ -1,5 +1,7 @@
 package ch.fmartin.outlooktoimap.poll;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.absent;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
@@ -51,6 +53,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 class PollerTest {
 
     private static final String JUNK = "Outlook Junk";
+    private static final String FOLDER_GONE = "Microsoft says this folder no longer exists. If it was renamed, moved or"
+            + " deleted, correct or remove this source under accounts[].folders[] in the configuration";
     private static final Monitoring MONITORING = new Monitoring(0, Monitoring.DEFAULT_HEALTH_BIND_ADDRESS, null);
 
     private final FakeGraph graph = new FakeGraph();
@@ -396,6 +400,79 @@ class PollerTest {
     }
 
     @Test
+    void aSourceFolderThatIsGoneIsNamedInTheAccountError() {
+        open(Engine.SQLITE);
+        graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders/junkemail/messages/delta()"))
+                .willReturn(FakeGraph.error(404, "ErrorItemNotFound")));
+
+        AccountResult result = poll(config(account("hotmail", false))).accounts().getFirst();
+
+        assertThat(result.error()).isEqualTo("junkemail: " + FOLDER_GONE);
+        assertThat(result.counts().failed()).isEqualTo(1);
+    }
+
+    @Test
+    void aSourceFolderThatIsGoneBehindASavedDeltaLinkIsRereadThenNamedInTheAccountError() {
+        open(Engine.SQLITE);
+        graph.deltaRound("junkemail", null, "t1", List.of(List.of()));
+        Config config = config(account("hotmail", false));
+        poll(config);
+        assertThat(store.checkpoint("hotmail", "junkemail")).isPresent();
+
+        graph.server.resetMappings();
+        graph.server.resetRequests();
+        graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders/junkemail/messages/delta()"))
+                .willReturn(FakeGraph.error(404, "ErrorItemNotFound")));
+        AccountResult result = poll(config).accounts().getFirst();
+
+        assertThat(result.error()).isEqualTo("junkemail: " + FOLDER_GONE);
+        graph.server.verify(1, getRequestedFor(urlPathEqualTo("/v1.0/me/mailFolders/junkemail/messages/delta()"))
+                .withQueryParam("$deltatoken", equalTo("t1")));
+        graph.server.verify(1, getRequestedFor(urlPathEqualTo("/v1.0/me/mailFolders/junkemail/messages/delta()"))
+                .withQueryParam("$deltatoken", absent()));
+    }
+
+    @Test
+    void aFolderOnTheSourcePathThatIsGoneIsNamedInTheAccountError() {
+        open(Engine.SQLITE);
+        // "Projects" is listed, then deleted before its children are asked for.
+        graph.topLevelFolder("f-p", "Projects");
+        graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders/f-p/childFolders"))
+                .willReturn(FakeGraph.error(404, "ErrorItemNotFound")));
+
+        AccountResult result = poll(config(account("hotmail", "Projects/2026", false))).accounts().getFirst();
+
+        assertThat(result.error()).isEqualTo("Projects/2026: " + FOLDER_GONE);
+    }
+
+    @Test
+    void aSavedDeltaLinkThatAnswers404RereadsTheFolderTheNameNowFinds() {
+        open(Engine.SQLITE);
+        graph.mime("m1", TestMessages.mime("m1"));
+        graph.mime("m2", TestMessages.mime("m2"));
+        graph.topLevelFolder("f-old", "Projects");
+        graph.deltaRound("f-old", null, "t1", List.of(List.of(Item.of("m1"))));
+        Config config = config(account("hotmail", "Projects", false));
+        poll(config);
+
+        // The old folder is gone for good, for example emptied out of Deleted Items, and another
+        // folder now has its name.
+        graph.server.resetMappings();
+        graph.mime("m1", TestMessages.mime("m1"));
+        graph.mime("m2", TestMessages.mime("m2"));
+        graph.topLevelFolder("f-new", "Projects");
+        graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders/f-old/messages/delta()"))
+                .willReturn(FakeGraph.error(404, "ErrorItemNotFound")));
+        graph.deltaRound("f-new", null, "n1", List.of(List.of(Item.of("m1"), Item.of("m2"))));
+        AccountResult result = poll(config).accounts().getFirst();
+
+        assertThat(result.error()).isNull();
+        assertThat(result.counts()).isEqualTo(new Counts(1, 0, 1, 0));
+        assertThat(fastmail.messages(JUNK)).hasSize(2);
+        assertThat(store.checkpoint("hotmail", "Projects").get().deltaLink()).isEqualTo(graph.deltaLink("f-new", "n1"));
+    }
+
+    @Test
     void aMessageMovedBetweenTwoSyncedFoldersIsCopiedOnce() {
         open(Engine.SQLITE);
         graph.mime("moved", TestMessages.mime("moved"));
@@ -532,8 +609,12 @@ class PollerTest {
     }
 
     private Account account(String name, boolean removeSource) {
+        return account(name, "junkemail", removeSource);
+    }
+
+    private Account account(String name, String source, boolean removeSource) {
         return new Account(name, name + "@hotmail.test", "app", "consumers",
-                List.of(new FolderMapping("junkemail", "fastmail", JUNK, removeSource)));
+                List.of(new FolderMapping(source, "fastmail", JUNK, removeSource)));
     }
 
     private Config config(Account... accounts) {

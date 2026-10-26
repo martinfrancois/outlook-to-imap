@@ -58,6 +58,7 @@ public final class GraphSource {
     private static final String PREFER_PAGE_SIZE = "odata.maxpagesize=" + PAGE_SIZE;
     private static final String[] FOLDER_FIELDS = {"id", "displayName"};
     private static final String[] DELTA_FIELDS = {"id", "internetMessageId", "receivedDateTime"};
+    private static final String CORRECT_THE_SOURCE = "correct or remove this source under accounts[].folders[] in the configuration";
 
     // Retries per request after a throttling or server error. Each waits for Retry-After, or backs
     // off exponentially, capped at RetryHandlerOption.MAX_DELAY seconds either way.
@@ -131,7 +132,7 @@ public final class GraphSource {
     }
 
     private String childFolder(String parentId, String displayName, String source) {
-        MailFolderCollectionResponse page = call(() -> firstFolderPage(parentId));
+        MailFolderCollectionResponse page = call(() -> firstFolderPage(parentId), GraphSource::folderGone);
         List<String> found = new ArrayList<>();
         iterate(page, MailFolderCollectionResponse::createFromDiscriminatorValue, (MailFolder folder) -> {
             if (displayName.equalsIgnoreCase(folder.getDisplayName())) {
@@ -139,9 +140,10 @@ public final class GraphSource {
                 return false;
             }
             return true;
-        }, null);
+        }, null, GraphSource::folderGone);
         if (found.isEmpty()) {
-            throw new FolderNotFoundException("no folder named \"" + displayName + "\" on the way to " + source);
+            throw new FolderNotFoundException(
+                    "no folder named \"" + displayName + "\" on the way to " + source + "; " + CORRECT_THE_SOURCE, null);
         }
         return found.getFirst();
     }
@@ -165,7 +167,9 @@ public final class GraphSource {
      * is how the first run picks up the backlog.
      */
     public Changes changes(String folderId, String deltaLink) {
-        DeltaGetResponse first = call(() -> firstDeltaPage(folderId, deltaLink));
+        // Failing on a 404 from the saved link would fail the mapping every poll until someone deletes the checkpoint, see docs/adr/0026-reread-a-folder-whose-saved-delta-link-answers-404.md
+        DeltaGetResponse first = call(() -> firstDeltaPage(folderId, deltaLink),
+                deltaLink == null ? GraphSource::folderGone : GraphSource::deltaLinkFolderGone);
         List<SourceMessage> messages = new ArrayList<>();
         String nextDeltaLink = iterate(first, DeltaGetResponse::createFromDiscriminatorValue, (Message m) -> {
             // Delta also reports messages that left the folder. Copying never deletes, so those
@@ -177,7 +181,7 @@ public final class GraphSource {
         }, request -> {
             request.headers.add("Prefer", PREFER_PAGE_SIZE);
             return request;
-        });
+        }, GraphSource::folderGone);
         return new Changes(messages, nextDeltaLink);
     }
 
@@ -202,18 +206,19 @@ public final class GraphSource {
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
-        });
+        }, MessageGoneException::new);
     }
 
     /** Moves the message to Deleted Items, where the user can still restore it. */
     public void moveToDeletedItems(String messageId) {
         MovePostRequestBody body = new MovePostRequestBody();
         body.setDestinationId("deleteditems");
-        call(() -> client.me().messages().byMessageId(messageId).move().post(body));
+        call(() -> client.me().messages().byMessageId(messageId).move().post(body), MessageGoneException::new);
     }
 
     private <E extends Parsable, P extends Parsable & AdditionalDataHolder> String iterate(
-            P page, ParsableFactory<P> factory, Function<E, Boolean> each, UnaryOperator<RequestInformation> configure) {
+            P page, ParsableFactory<P> factory, Function<E, Boolean> each, UnaryOperator<RequestInformation> configure,
+            Function<ApiException, GraphException> notFound) {
         return call(() -> {
             try {
                 PageIterator.Builder<E, P> builder = new PageIterator.Builder<E, P>()
@@ -230,25 +235,31 @@ public final class GraphSource {
             } catch (ReflectiveOperationException e) {
                 throw new IllegalStateException("Graph SDK paging failed", e);
             }
-        });
+        }, notFound);
     }
 
-    private <T> T call(Supplier<T> request) {
+    /**
+     * Runs one request and turns Graph's error reply into the matching exception.
+     *
+     * @param notFound what a 404 means for this request; Graph answers a missing message and a
+     *     missing folder alike
+     */
+    private <T> T call(Supplier<T> request, Function<ApiException, GraphException> notFound) {
         try {
             return request.get();
         } catch (ApiException e) {
-            throw translate(e);
+            throw translate(e, notFound);
         }
     }
 
-    private static RuntimeException translate(ApiException e) {
+    private static RuntimeException translate(ApiException e, Function<ApiException, GraphException> notFound) {
         int status = e.getResponseStatusCode();
         String code = e instanceof ODataError odata && odata.getError() != null ? odata.getError().getCode() : null;
         if (status == 410 || "SyncStateNotFound".equalsIgnoreCase(code) || "resyncRequired".equalsIgnoreCase(code)) {
-            return new DeltaExpiredException(e);
+            return new DeltaExpiredException("delta link expired", e);
         }
         if (status == 404 || "ErrorItemNotFound".equals(code)) {
-            return new MessageGoneException(e);
+            return notFound.apply(e);
         }
         if (status == 429 || status == 503 || status == 504) {
             return new ThrottledException(status, e);
@@ -267,10 +278,22 @@ public final class GraphSource {
         }
     }
 
-    /** The delta link is too old; the folder has to be listed from the start again. */
+    private static GraphException folderGone(ApiException e) {
+        return new FolderNotFoundException(
+                "Microsoft says this folder no longer exists. If it was renamed, moved or deleted, " + CORRECT_THE_SOURCE, e);
+    }
+
+    private static GraphException deltaLinkFolderGone(ApiException e) {
+        return new DeltaExpiredException("delta link names a folder that no longer exists", e);
+    }
+
+    /**
+     * The delta link is too old, or names a folder that is gone; the folder has to be listed from
+     * the start again.
+     */
     public static final class DeltaExpiredException extends GraphException {
-        DeltaExpiredException(Throwable cause) {
-            super("delta link expired", cause);
+        DeltaExpiredException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 
@@ -289,10 +312,10 @@ public final class GraphSource {
         }
     }
 
-    /** A configured folder path names a folder that does not exist. */
+    /** A configured source names a folder that does not exist, or no longer does. */
     public static final class FolderNotFoundException extends GraphException {
-        FolderNotFoundException(String message) {
-            super(message, null);
+        FolderNotFoundException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 }
