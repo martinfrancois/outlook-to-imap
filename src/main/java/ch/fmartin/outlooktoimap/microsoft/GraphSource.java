@@ -37,7 +37,7 @@ import okhttp3.OkHttpClient;
 
 /**
  * One source account, read through Graph. The Graph SDK pages, retries throttled requests
- * (honouring {@code Retry-After}, with capped exponential backoff otherwise) and parses replies;
+ * (waiting for {@code Retry-After} or backing off, capped per wait) and parses replies;
  * this class picks the requests and turns Graph's error replies into the cases the copy logic
  * handles differently.
  */
@@ -59,8 +59,8 @@ public final class GraphSource {
     private static final String[] FOLDER_FIELDS = {"id", "displayName"};
     private static final String[] DELTA_FIELDS = {"id", "internetMessageId", "receivedDateTime"};
 
-    // Retries per request after a throttling or server error; each waits for Retry-After, or backs
-    // off exponentially up to RetryHandlerOption.MAX_DELAY seconds.
+    // Retries per request after a throttling or server error. Each waits for Retry-After, or backs
+    // off exponentially, capped at RetryHandlerOption.MAX_DELAY seconds either way.
     static final int MAX_RETRIES = 5;
 
     private final GraphServiceClient client;
@@ -90,10 +90,9 @@ public final class GraphSource {
     }
 
     /**
-     * The SDK's client with its retry handler, plus the immutable-id header. Its overall call
-     * timeout of 100 seconds would also cover the retry handler's waits, which honour Retry-After
-     * and can add up to several minutes, so it is lifted; the per-attempt connect and read
-     * timeouts stay.
+     * The SDK's client with its retry handler, plus the immutable-id header. The SDK's overall
+     * call timeout would also cover the retry handler's waits, which honour Retry-After and can add
+     * up to several minutes, so it is lifted; the per-attempt connect and read timeouts stay.
      */
     static OkHttpClient httpClient(RetryHandlerOption retry) {
         return GraphClientFactory.create(new RequestOption[] {retry})

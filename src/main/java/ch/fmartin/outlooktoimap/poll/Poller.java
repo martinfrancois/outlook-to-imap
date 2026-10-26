@@ -173,6 +173,9 @@ public final class Poller {
             } catch (RuntimeException e) {
                 fail("unexpected failure: " + e, e);
             }
+            if (interrupted) {
+                errors.add("poll interrupted before every folder was read");
+            }
             return new AccountResult(account.name(), startedAt, new Counts(imported, removed, skipped, failed),
                     errors.isEmpty() ? null : String.join("; ", errors), interrupted);
         }
