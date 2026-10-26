@@ -10,9 +10,6 @@
 
 ### Bug Fixes
 
-* address the first review round ([cd84eea](https://github.com/martinfrancois/outlook-to-imap/commit/cd84eea63e1db61791a999ffd1316b2a3e131edd))
-* address the second review round ([a0e92ad](https://github.com/martinfrancois/outlook-to-imap/commit/a0e92ada286d3e3857d984ef48d9449636b916cd))
-* address the third review round ([612b3e2](https://github.com/martinfrancois/outlook-to-imap/commit/612b3e23a15261de175ef21e50ac3fe7b0b3fa78))
 * **deps:** pin Jackson 2 and OpenTelemetry to versions without known vulnerabilities ([66041ca](https://github.com/martinfrancois/outlook-to-imap/commit/66041ca3cfa8d8fb3fbd8c804873f8b23415664d))
 
 
