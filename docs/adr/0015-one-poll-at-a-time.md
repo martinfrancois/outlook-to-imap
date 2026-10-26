@@ -8,6 +8,9 @@ informed: [Future maintainers and agents working on this repository]
 
 # One poll at a time, across processes
 
+[ADR 0022](0022-keep-the-poll-lease-when-a-stop-outlasts-its-grace.md) replaces one part of this
+record: when a stop outlasts its grace, the lease is now left to expire instead of released.
+
 ## Context and Problem Statement
 
 A receipt only stops a second upload if the first one wrote it before the second looked. Two polls
@@ -92,10 +95,10 @@ Stopping (`Main`):
 
 `StoreTest.onlyOneHolderGetsTheLeaseUntilItIsReleasedOrExpires`; in `PollServiceTest`:
 `doesNotPollWhileAnotherProcessHoldsTheLease`, `aPollThatLosesTheLeaseStopsBeforeTheNextMessage`,
-`aDryRunIgnoresTheLeaseBecauseItCopiesAndRemovesNothing`,
-`aServiceThatFindsTheLeaseTakenTriesAgainBeforeTheNextInterval`,
-`aStopThatOutlastsItsGraceDuringASinglePollKeepsTheLeaseUntilThePollEnds` and
-`aStopThatOutlastsItsGraceKeepsTheLeaseWhileTheUploadHangs`. For interrupted polls:
+`aDryRunIgnoresTheLeaseBecauseItCopiesAndRemovesNothing`
+and `aServiceThatFindsTheLeaseTakenTriesAgainBeforeTheNextInterval`; the tests for a stop that
+outlasts its grace are listed in [ADR 0022](0022-keep-the-poll-lease-when-a-stop-outlasts-its-grace.md).
+For interrupted polls:
 `PollerTest.aStopRequestEndsThePollAtAMessageBoundaryAndKeepsTheCheckpoint` and
 `StoreTest.aFailedPollKeepsTheLastSuccess`. The exit codes are constants in `Main`. In
 `PollService`, `LEASE` is 15 minutes and `LEASE_RENEWAL` is a fifth of it.

@@ -185,6 +185,7 @@ public final class PollService {
             // No release here: the poll may still be inside an upload, and another process that
             // took the lease now would find no copy yet and upload the same message again. The
             // lease runs out LEASE after its last renewal; the poll releases it if it ends first.
+            // docs/adr/0022-keep-the-poll-lease-when-a-stop-outlasts-its-grace.md
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
