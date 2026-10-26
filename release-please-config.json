@@ -11,7 +11,11 @@
       "component": "outlook-to-imap",
       "package-name": "outlook-to-imap",
       "changelog-path": "CHANGELOG.md",
-      "initial-version": "1.0.0"
+      "initial-version": "1.0.0",
+      "extra-files": [
+        "README.md",
+        "examples/compose.yaml"
+      ]
     }
   }
 }
