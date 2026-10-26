@@ -34,5 +34,6 @@ HEALTHCHECK --interval=1m --timeout=10s --start-period=2m --retries=3 \
     CMD curl -fsS -o /dev/null http://127.0.0.1:8080/health || exit 1
 # Exec form makes java PID 1, so `docker stop` reaches the shutdown hook that ends a poll cleanly.
 # A JVM out of memory exits, so the restart policy brings back a clean one.
+# docs/adr/0023-a-poll-that-dies-of-an-error-keeps-the-service-polling.md
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-XX:+ExitOnOutOfMemoryError", "-jar", "/opt/outlook-to-imap/outlook-to-imap.jar"]
 CMD ["run"]
