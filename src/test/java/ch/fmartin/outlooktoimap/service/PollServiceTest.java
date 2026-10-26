@@ -43,6 +43,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -160,14 +162,83 @@ class PollServiceTest {
             assertThat(response.body()).contains("\"status\":\"up\"").contains("\"account\":\"hotmail\"").contains("\"imported\":1")
                     .contains("\"lastPollFinishedAt\":\"2026-10-26T10:00:00Z\"");
 
-            // Two intervals plus the lease margin without progress means the poll loop is stuck.
-            clock.advance(Duration.ofHours(2).plusMinutes(16));
+            // Two intervals plus the margin without progress means the poll loop is stuck.
+            clock.advance(config.pollInterval().multipliedBy(2).plus(PollService.HEALTH_MARGIN).plusSeconds(1));
             assertThat(service.healthy()).isFalse();
             assertThat(get(health).statusCode()).isEqualTo(503);
         } finally {
             service.stop(Duration.ofSeconds(10));
         }
         assertThat(service.healthy()).isFalse();
+    }
+
+    @Test
+    void aServiceThatFindsTheLeaseTakenTriesAgainBeforeTheNextInterval() throws Exception {
+        // A crashed process left its lease behind.
+        store.acquireLease("crashed-host/1", clock.instant(), clock.instant().plusSeconds(900));
+        Poller poller = new Poller(config, store, a -> "token", a -> graph.source(), fastmail::connect, clock);
+        PollService service = new PollService(poller, store, new Heartbeat(null), config.pollInterval(), clock,
+                Duration.ofMillis(50));
+
+        service.start();
+        try {
+            clock.advance(Duration.ofMinutes(16));
+            waitFor(() -> service.lastFinished() != null);
+            assertThat(fastmail.messages("Outlook Junk")).hasSize(1);
+        } finally {
+            service.stop(Duration.ofSeconds(10));
+        }
+    }
+
+    @Test
+    void aStopDuringASinglePollReleasesTheLeaseWhenTheGraceRunsOut() throws Exception {
+        CountDownLatch uploading = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        PollService service = service(a -> "token", d -> new AfterAppend(fastmail.connect(d), () -> {
+            uploading.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }));
+        Thread once = new Thread(() -> service.pollOnce(false, line -> {}));
+        once.start();
+        try {
+            assertThat(uploading.await(30, TimeUnit.SECONDS)).isTrue();
+
+            service.stop(Duration.ofMillis(200));
+
+            assertThat(store.acquireLease("next-run/1", clock.instant(), clock.instant().plusSeconds(900))).isTrue();
+        } finally {
+            release.countDown();
+            once.join();
+        }
+    }
+
+    @Test
+    void aStopThatOutlastsItsGraceReleasesTheLeaseForTheNextStart() throws Exception {
+        CountDownLatch uploading = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        // An upload that hangs, as a throttled Graph call waiting out a long Retry-After would.
+        PollService service = service(a -> "token", d -> new AfterAppend(fastmail.connect(d), () -> {
+            uploading.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }));
+        service.start();
+        try {
+            assertThat(uploading.await(30, TimeUnit.SECONDS)).isTrue();
+
+            service.stop(Duration.ofMillis(200));
+
+            assertThat(store.acquireLease("restarted-host/1", clock.instant(), clock.instant().plusSeconds(900))).isTrue();
+        } finally {
+            release.countDown();
+        }
     }
 
     @Test

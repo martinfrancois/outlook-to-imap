@@ -68,6 +68,17 @@ class ImapDestinationTest {
     }
 
     @Test
+    void lookingForACopyNeverCreatesAFolder() {
+        try (ImapDestination destination = imap.connect(destination())) {
+            assertThat(destination.find("Old Junk", fingerprint(TestMessages.mime("m1")))).isEmpty();
+            assertThat(destination.contains("Old Junk", 1)).isFalse();
+        }
+
+        assertThat(imap.greenMail.getManagers().getImapHostManager()
+                .getFolder(imap.greenMail.getManagers().getUserManager().getUser(FakeImap.USER), "Old Junk")).isNull();
+    }
+
+    @Test
     void aSharedMessageIdWithDifferentContentIsNotAMatch() {
         // Spam often reuses Message-IDs, so the id alone must not count as "already uploaded".
         byte[] first = TestMessages.mime("<same@spam.example>", "first", "Wed, 01 Oct 2026 08:00:00 +0000");

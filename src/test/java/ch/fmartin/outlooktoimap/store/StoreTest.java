@@ -118,6 +118,13 @@ class StoreTest {
 
             // A holder that died stops renewing; its lease runs out and another can take over.
             assertThat(store.acquireLease("c", T0.plusSeconds(905), T0.plusSeconds(1800))).isTrue();
+
+            // Renewing extends only a lease still held, never a released or taken one.
+            assertThat(store.renewLease("c", T0.plusSeconds(2000))).isTrue();
+            assertThat(store.renewLease("b", T0.plusSeconds(2000))).isFalse();
+            store.releaseLease("c");
+            assertThat(store.renewLease("c", T0.plusSeconds(2100))).isFalse();
+            assertThat(store.acquireLease("d", T0.plusSeconds(1000), T0.plusSeconds(1900))).isTrue();
         }
     }
 

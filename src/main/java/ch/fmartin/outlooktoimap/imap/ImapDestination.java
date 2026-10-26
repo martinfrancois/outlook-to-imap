@@ -78,7 +78,7 @@ public final class ImapDestination implements DestinationConnection {
 
     @Override
     public OptionalLong append(String folderPath, byte[] mime, Date received) {
-        return run(folderPath, folder -> {
+        return run(folderPath, true, folder -> {
             AppendUID[] uids = folder.appendUIDMessages(new Message[] {new RawMessage(mime, received)});
             return uids != null && uids.length == 1 && uids[0] != null ? OptionalLong.of(uids[0].uid) : OptionalLong.empty();
         });
@@ -86,12 +86,15 @@ public final class ImapDestination implements DestinationConnection {
 
     @Override
     public boolean contains(String folderPath, long uid) {
-        return run(folderPath, folder -> folder.getMessageByUID(uid) != null);
+        return run(folderPath, false, folder -> folder != null && folder.getMessageByUID(uid) != null);
     }
 
     @Override
     public OptionalLong find(String folderPath, Fingerprint fingerprint) {
-        return run(folderPath, folder -> {
+        return run(folderPath, false, folder -> {
+            if (folder == null) {
+                return OptionalLong.empty();
+            }
             for (Message candidate : candidates(folder, fingerprint)) {
                 if (candidate.getSize() != fingerprint.size()) {
                     continue;
@@ -138,9 +141,10 @@ public final class ImapDestination implements DestinationConnection {
         }
     }
 
-    private <T> T run(String folderPath, FolderAction<T> action) {
+    /** {@code create} false passes null for a missing folder: looking for a copy never creates one. */
+    private <T> T run(String folderPath, boolean create, FolderAction<T> action) {
         try {
-            return action.apply(folder(folderPath));
+            return action.apply(folder(folderPath, create));
         } catch (StoreClosedException | FolderClosedException e) {
             throw new DestinationUnavailableException(destination.name(), e);
         } catch (MessagingException e) {
@@ -153,7 +157,7 @@ public final class ImapDestination implements DestinationConnection {
         }
     }
 
-    private IMAPFolder folder(String path) throws MessagingException {
+    private IMAPFolder folder(String path, boolean create) throws MessagingException {
         IMAPFolder open = folders.get(path);
         if (open != null && open.isOpen()) {
             return open;
@@ -161,6 +165,9 @@ public final class ImapDestination implements DestinationConnection {
         char separator = store.getDefaultFolder().getSeparator();
         IMAPFolder folder = (IMAPFolder) store.getFolder(path.replace('/', separator));
         if (!folder.exists()) {
+            if (!create) {
+                return null;
+            }
             if (!folder.create(Folder.HOLDS_MESSAGES)) {
                 throw new MessagingException("cannot create folder " + path);
             }

@@ -231,6 +231,17 @@ public final class Store implements AutoCloseable {
                 .execute()) == 1;
     }
 
+    /**
+     * Extends the poll lease only while {@code holder} still has it. Unlike {@link #acquireLease},
+     * it never takes a lease that was released or taken over meanwhile.
+     */
+    public boolean renewLease(String holder, Instant until) {
+        return jdbi.withHandle(h -> h.createUpdate("UPDATE poll_lease SET expires_at = :until WHERE id = 1 AND holder = :holder")
+                .bind("holder", holder)
+                .bind("until", until.toEpochMilli())
+                .execute()) == 1;
+    }
+
     public void releaseLease(String holder) {
         jdbi.useHandle(h -> h.createUpdate("UPDATE poll_lease SET holder = NULL, expires_at = NULL WHERE id = 1 AND holder = :holder")
                 .bind("holder", holder)

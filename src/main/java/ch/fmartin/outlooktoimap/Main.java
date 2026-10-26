@@ -115,10 +115,19 @@ public final class Main {
         Config config = config();
         try (Store store = Store.open(config.database())) {
             PrintWriter out = spec.commandLine().getOut();
-            Optional<PollReport> report = service(config, store).pollOnce(dryRun, line -> {
-                out.println(line);
-                out.flush();
-            });
+            PollService service = service(config, store);
+            // Ctrl-C or a scheduler's deadline ends the poll at a message boundary, as in run.
+            Thread stopOnSignal = new Thread(() -> service.stop(SHUTDOWN_GRACE), "shutdown");
+            Runtime.getRuntime().addShutdownHook(stopOnSignal);
+            Optional<PollReport> report;
+            try {
+                report = service.pollOnce(dryRun, line -> {
+                    out.println(line);
+                    out.flush();
+                });
+            } finally {
+                removeHook(stopOnSignal);
+            }
             if (report.isEmpty()) {
                 return EXIT_BUSY;
             }
@@ -147,6 +156,14 @@ public final class Main {
                 }
             }
             return 0;
+        }
+    }
+
+    private static void removeHook(Thread hook) {
+        try {
+            Runtime.getRuntime().removeShutdownHook(hook);
+        } catch (IllegalStateException e) {
+            // The JVM is already shutting down and running the hook.
         }
     }
 

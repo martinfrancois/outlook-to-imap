@@ -16,7 +16,7 @@ for throughput.
 A poll costs one request per 100 messages listed, one per message copied and one per message
 removed. A first poll of a 9,000-message folder with removal on needs about 18,100, so it is
 throttled. The Graph SDK's retry handler waits for `Retry-After` when Microsoft sends one and backs
-off exponentially (up to 180 seconds, 5 retries) when it doesn't. When a mailbox is still throttled
+off exponentially when it doesn't, either way at most 180 seconds per wait and 5 retries. When a mailbox is still throttled
 after that, the poll stops that account, keeps its checkpoint where it was and goes on with the
 next account; receipts make the next poll continue where this one stopped. Tests play 429 and 503
 replies against the real SDK: waiting for `Retry-After`, backing off without it, throttling in the

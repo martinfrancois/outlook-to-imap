@@ -332,9 +332,9 @@ exactly the bytes being sent.
   next poll sees the failed message again; the messages that worked are skipped by their receipts.
 - **One folder or account failing** doesn't stop the others either. That includes an account
   that needs a new login, and one that Microsoft keeps throttling.
-- **Throttling.** Microsoft's `Retry-After` is honoured. Without one, retries back off exponentially,
-  up to 180 seconds per wait and 5 retries per request. A mailbox still throttled after that is
-  skipped until the next poll.
+- **Throttling.** Each request is retried up to 5 times. Every retry waits as long as Microsoft's
+  `Retry-After` asks, or backs off exponentially without one, but never more than 180 seconds,
+  the Graph SDK's limit. A mailbox still throttled after that is skipped until the next poll.
 - **First run and downtime.** The first poll of a folder reads all of it, which copies the backlog.
   Later polls ask Graph only for what changed since. A position Graph no longer accepts (after long
   downtime) leads to a full reread, and the receipts skip everything already copied.
