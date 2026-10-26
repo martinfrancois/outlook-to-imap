@@ -215,6 +215,27 @@ Run `umask 077` before you create the configuration, the password files or the s
 in the Docker steps. The service creates a missing state directory and a new SQLite database
 readable only by your user, but a directory you created first keeps the mode your umask gave it.
 
+### Verify a download
+
+The release workflow attests the jar and the image it builds: GitHub stores a signed record that
+this repository's workflow produced exactly these bytes. Check it with the
+[GitHub CLI](https://cli.github.com):
+
+```bash
+gh attestation verify outlook-to-imap-<version>.jar -R martinfrancois/outlook-to-imap
+gh attestation verify oci://ghcr.io/martinfrancois/outlook-to-imap:<version> -R martinfrancois/outlook-to-imap
+```
+
+Each release also has `outlook-to-imap-<version>.jar.sha3-256`, the SHA3-256 hash of the jar. It
+shows the download is complete, but not who built it, because whoever can replace the jar can
+replace the hash too. In the download folder, with OpenSSL 1.1.1 or newer:
+
+```bash
+openssl dgst -sha3-256 -r outlook-to-imap-<version>.jar | cmp - outlook-to-imap-<version>.jar.sha3-256 && echo OK
+```
+
+Version 1.0.0 has no attestation and a SHA-256 file instead.
+
 ### Commands
 
 | Command | What it does | Exit code |
