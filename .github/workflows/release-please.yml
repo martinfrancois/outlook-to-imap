@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
+      actions: write
       contents: write
       issues: write
       pull-requests: write
@@ -25,6 +26,14 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Run CI on the release pull request
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+        run: gh workflow run ci.yml --ref "$BRANCH"
 
       - name: Check out the release tag
         if: ${{ steps.release.outputs.release_created == 'true' }}

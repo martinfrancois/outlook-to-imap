@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The release workflow starts this on the release pull request's branch, because a pull request
+  # that the Actions token opens or updates starts no pull_request workflows. The checks attach
+  # to the branch head, so they count as the pull request's required checks.
+  workflow_dispatch:
 
 permissions:
   contents: read
