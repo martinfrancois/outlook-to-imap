@@ -28,6 +28,23 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- The Graph SDK's azure-core and JWT libraries need Jackson 2 at runtime. Without this,
+                 Maven takes whichever version a test library or azure-core asks for, vulnerable or not. -->
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>2.22.4</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Kiota pulls in OpenTelemetry; this keeps it at a version without known vulnerabilities. -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>1.67.0</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -277,6 +294,12 @@
                                 </transformer>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
                                     <resource>META-INF/FastDoubleParser-LICENSE</resource>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>META-INF/FastDoubleParser-ThirdParty-LICENSE</resource>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>META-INF/Schubfach-LICENSE</resource>
                                 </transformer>
                             </transformers>
                         </configuration>
