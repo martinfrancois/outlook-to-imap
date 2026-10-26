@@ -66,6 +66,7 @@ jobs:
           ./mvnw -B verify
           mkdir dist
           cp target/outlook-to-imap.jar "dist/outlook-to-imap-${VERSION}.jar"
+          # SHA3-256 is the project's hash where it picks one; docs/adr/0021-release-integrity-with-sha3-and-attestations.md
           (cd dist && openssl dgst -sha3-256 -r "outlook-to-imap-${VERSION}.jar" > "outlook-to-imap-${VERSION}.jar.sha3-256")
           test "$(unzip -p "dist/outlook-to-imap-${VERSION}.jar" META-INF/MANIFEST.MF | tr -d '\r' | sed -n 's/^Implementation-Version: //p')" = "$VERSION"
 

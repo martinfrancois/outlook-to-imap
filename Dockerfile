@@ -3,6 +3,7 @@ FROM docker.io/library/eclipse-temurin:25-jdk@sha256:2d5d5e9b533342a565907c84f47
 WORKDIR /src
 # Without unzip the wrapper downloads Maven's .tar.gz instead of the .zip whose SHA-256
 # maven-wrapper.properties holds, and stops at the checksum.
+# docs/adr/0021-release-integrity-with-sha3-and-attestations.md
 RUN apt-get update \
     && apt-get install -y --no-install-recommends unzip \
     && rm -rf /var/lib/apt/lists/*
