@@ -2,7 +2,7 @@
 # Expects config.yaml and secrets/ next to this file.
 services:
   outlook-to-imap:
-    image: ghcr.io/martinfrancois/outlook-to-imap:1
+    image: ghcr.io/martinfrancois/outlook-to-imap:1 # x-release-please-major
     restart: unless-stopped
     # The service finishes the message it is on when stopped; give it the time to.
     stop_grace_period: 30s

@@ -156,14 +156,14 @@ docker volume create outlook-to-imap-data
 docker run --rm -it \
   -v "$PWD/config.yaml:/config/config.yaml:ro" -v "$PWD/secrets:/config/secrets:ro" \
   -v outlook-to-imap-data:/data \
-  ghcr.io/martinfrancois/outlook-to-imap:1 authorize hotmail
+  ghcr.io/martinfrancois/outlook-to-imap:1 authorize hotmail # x-release-please-major
 
 # Run as a service
 docker run -d --name outlook-to-imap --restart unless-stopped --stop-timeout 30 \
   --read-only --tmpfs /tmp:exec --cap-drop ALL --security-opt no-new-privileges \
   -v "$PWD/config.yaml:/config/config.yaml:ro" -v "$PWD/secrets:/config/secrets:ro" \
   -v outlook-to-imap-data:/data \
-  ghcr.io/martinfrancois/outlook-to-imap:1
+  ghcr.io/martinfrancois/outlook-to-imap:1 # x-release-please-major
 ```
 
 Or with Compose, using [`examples/compose.yaml`](examples/compose.yaml):
@@ -198,13 +198,13 @@ with `podman unshare chown -R 10001 config.yaml secrets` before the first `autho
 podman run --rm -it \
   -v "$PWD/config.yaml:/config/config.yaml:ro,Z" -v "$PWD/secrets:/config/secrets:ro,Z" \
   -v outlook-to-imap-data:/data \
-  ghcr.io/martinfrancois/outlook-to-imap:1 authorize hotmail
+  ghcr.io/martinfrancois/outlook-to-imap:1 authorize hotmail # x-release-please-major
 
 podman run -d --name outlook-to-imap --restart unless-stopped --stop-timeout 30 \
   --read-only --tmpfs /tmp:exec --cap-drop ALL --security-opt no-new-privileges \
   -v "$PWD/config.yaml:/config/config.yaml:ro,Z" -v "$PWD/secrets:/config/secrets:ro,Z" \
   -v outlook-to-imap-data:/data \
-  ghcr.io/martinfrancois/outlook-to-imap:1
+  ghcr.io/martinfrancois/outlook-to-imap:1 # x-release-please-major
 ```
 
 `--restart unless-stopped` restarts the container when it exits. After a reboot, Docker starts it
