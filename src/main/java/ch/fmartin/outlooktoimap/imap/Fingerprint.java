@@ -65,7 +65,8 @@ public record Fingerprint(String messageId, String date, String contentHash, lon
     /**
      * The part of a header value to search for. SEARCH HEADER matches substrings; GreenMail compares
      * a folded header as stored and Dovecot compares it unfolded, so only a part without the line
-     * break matches on both. The longest such part narrows the search the most.
+     * break matches on both. The longest such part narrows the search the most. The probe that
+     * showed this is in docs/adr/0014-verify-each-upload-and-settle-unknown-ones-by-content.md.
      */
     private static String searchable(String value) {
         if (value == null) {
