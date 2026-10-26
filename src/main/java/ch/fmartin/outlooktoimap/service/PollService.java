@@ -150,7 +150,9 @@ public final class PollService {
             } else {
                 LOG.info("poll finished\n{}", report.get().summary());
             }
-        } catch (RuntimeException e) {
+        } catch (Throwable e) {
+            // Without the next schedule the process stays up and never polls again. An
+            // OutOfMemoryError from one oversized message leaves a usable heap once the stack unwinds.
             LOG.error("poll failed", e);
         }
         if (!stopping.get()) {

@@ -50,6 +50,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -193,6 +194,24 @@ class PollServiceTest {
             clock.advance(Duration.ofMinutes(16));
             waitFor(() -> service.lastFinished() != null);
             assertThat(fastmail.messages("Outlook Junk")).hasSize(1);
+        } finally {
+            service.stop(Duration.ofSeconds(10));
+        }
+    }
+
+    @Test
+    void aPollThatDiesOfAnErrorStillSchedulesTheNextOne() throws Exception {
+        OutOfMemoryOnce outOfMemoryOnce = new OutOfMemoryOnce();
+        Poller poller = new Poller(config, store, outOfMemoryOnce, a -> graph.source(), fastmail::connect, clock);
+        PollService service = new PollService(poller, store, new Heartbeat(null), Duration.ofMillis(100), clock,
+                Duration.ofMillis(50));
+
+        service.start();
+        try {
+            waitFor(() -> service.lastFinished() != null);
+            assertThat(outOfMemoryOnce.logins.get()).isGreaterThan(1);
+            assertThat(fastmail.messages("Outlook Junk")).hasSize(1);
+            assertThat(service.healthy()).isTrue();
         } finally {
             service.stop(Duration.ofSeconds(10));
         }
@@ -397,6 +416,19 @@ class PollServiceTest {
         @Override
         public Clock withZone(java.time.ZoneId zone) {
             return this;
+        }
+    }
+
+    /** Fails the first login with an OutOfMemoryError, as a message too big for the heap would. */
+    private static final class OutOfMemoryOnce implements AccessTokens {
+        final AtomicInteger logins = new AtomicInteger();
+
+        @Override
+        public String accessToken(Account account) {
+            if (logins.getAndIncrement() == 0) {
+                throw new OutOfMemoryError("Java heap space");
+            }
+            return "token";
         }
     }
 }
