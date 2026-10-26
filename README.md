@@ -233,7 +233,9 @@ A poll never overlaps another. `run` waits for the poll to end before counting t
 lease in the database stops a `once` from polling while another process with the same database is
 mid-poll. When stopped (SIGTERM, `docker stop`), it finishes the message it's on and exits. A poll cut
 short like that sends no heartbeat and doesn't count as a successful poll; the next one carries on
-where it stopped.
+where it stopped. If that message takes longer than 25 seconds, as a hung upload can, the process
+exits without it and leaves the lease to expire, because the upload may still land. The next start
+then waits up to 18 minutes before it polls.
 
 ## Sign in
 

@@ -218,54 +218,59 @@ class PollServiceTest {
     }
 
     @Test
-    void aStopDuringASinglePollReleasesTheLeaseWhenTheGraceRunsOut() throws Exception {
-        CountDownLatch uploading = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        PollService service = service(a -> "token", d -> new AfterAppend(fastmail.connect(d), () -> {
-            uploading.countDown();
-            try {
-                release.await();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }));
+    void aStopThatOutlastsItsGraceDuringASinglePollKeepsTheLeaseUntilThePollEnds() throws Exception {
+        HangingUpload upload = new HangingUpload();
+        PollService service = service(a -> "token", upload::connect);
         Thread once = new Thread(() -> service.pollOnce(false, line -> {}));
         once.start();
         try {
-            assertThat(uploading.await(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(upload.awaitStart()).isTrue();
 
             service.stop(Duration.ofMillis(200));
 
-            assertThat(store.acquireLease("next-run/1", clock.instant(), clock.instant().plusSeconds(900))).isTrue();
+            // The poll is still inside the upload, so another process must not start the message again.
+            assertThat(store.acquireLease("next-run/1", clock.instant(), clock.instant().plusSeconds(900))).isFalse();
         } finally {
-            release.countDown();
+            upload.release();
             once.join();
         }
+        assertThat(store.acquireLease("next-run/1", clock.instant(), clock.instant().plusSeconds(900))).isTrue();
     }
 
     @Test
-    void aStopThatOutlastsItsGraceReleasesTheLeaseForTheNextStart() throws Exception {
-        CountDownLatch uploading = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
+    void aStopThatOutlastsItsGraceKeepsTheLeaseWhileTheUploadHangs() throws Exception {
+        HangingUpload upload = new HangingUpload();
         // An upload that hangs, as a throttled Graph call waiting out a long Retry-After would.
-        PollService service = service(a -> "token", d -> new AfterAppend(fastmail.connect(d), () -> {
-            uploading.countDown();
-            try {
-                release.await();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }));
+        PollService service = service(a -> "token", upload::connect);
         service.start();
         try {
-            assertThat(uploading.await(30, TimeUnit.SECONDS)).isTrue();
+            assertThat(upload.awaitStart()).isTrue();
 
             service.stop(Duration.ofMillis(200));
 
-            assertThat(store.acquireLease("restarted-host/1", clock.instant(), clock.instant().plusSeconds(900))).isTrue();
+            assertThat(store.acquireLease("restarted-host/1", clock.instant(), clock.instant().plusSeconds(900))).isFalse();
         } finally {
-            release.countDown();
+            upload.release();
         }
+        waitFor(() -> store.acquireLease("restarted-host/1", clock.instant(), clock.instant().plusSeconds(900)));
+    }
+
+    @Test
+    void aStopThatEndsWithinItsGraceReleasesTheLeaseForTheNextStartAtOnce() throws Exception {
+        HangingUpload upload = new HangingUpload();
+        PollService service = service(a -> "token", upload::connect);
+        service.start();
+        assertThat(upload.awaitStart()).isTrue();
+        Thread stop = new Thread(() -> service.stop(Duration.ofSeconds(30)));
+        stop.start();
+        // The stop waits for the poll before the upload finishes.
+        waitFor(() -> stop.getState() == Thread.State.TIMED_WAITING);
+
+        upload.release();
+
+        assertThat(stop.join(Duration.ofSeconds(30))).isTrue();
+        assertThat(fastmail.messages("Outlook Junk")).hasSize(1);
+        assertThat(store.acquireLease("restarted-host/1", clock.instant(), clock.instant().plusSeconds(900))).isTrue();
     }
 
     @Test
@@ -357,6 +362,21 @@ class PollServiceTest {
                 HttpResponse.BodyHandlers.ofString());
     }
 
+    /** Waits as a blocking socket read does, which an interrupt does not end. */
+    private static void awaitLikeABlockingRead(CountDownLatch latch) {
+        boolean interrupted = false;
+        while (latch.getCount() > 0) {
+            try {
+                latch.await();
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private static void waitFor(java.util.function.BooleanSupplier condition) throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
         while (!condition.getAsBoolean()) {
@@ -364,6 +384,29 @@ class PollServiceTest {
                 throw new AssertionError("condition not met within 30 seconds");
             }
             Thread.sleep(20);
+        }
+    }
+
+    /** An upload that reaches the server, then hangs until {@link #release()}. */
+    private final class HangingUpload {
+        private final CountDownLatch started = new CountDownLatch(1);
+        private final CountDownLatch released = new CountDownLatch(1);
+
+        DestinationConnection connect(Destination destination) {
+            return new AfterAppend(fastmail.connect(destination), this::hang);
+        }
+
+        private void hang() {
+            started.countDown();
+            awaitLikeABlockingRead(released);
+        }
+
+        boolean awaitStart() throws InterruptedException {
+            return started.await(30, TimeUnit.SECONDS);
+        }
+
+        void release() {
+            released.countDown();
         }
     }
 

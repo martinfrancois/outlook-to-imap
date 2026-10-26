@@ -178,13 +178,13 @@ public final class PollService {
                 polling.unlock();
                 return;
             }
-            LOG.warn("poll did not stop within {}; exiting anyway, the next start reconciles it", grace);
+            LOG.warn("poll did not stop within {}; exiting anyway and leaving the poll lease to expire", grace);
             if (executor != null) {
                 executor.shutdownNow();
             }
-            // The poll may never reach its own release before the JVM exits, and a restarted
-            // process would then find the lease taken until it expires.
-            store.releaseLease(holder);
+            // No release here: the poll may still be inside an upload, and another process that
+            // took the lease now would find no copy yet and upload the same message again. The
+            // lease runs out LEASE after its last renewal; the poll releases it if it ends first.
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
