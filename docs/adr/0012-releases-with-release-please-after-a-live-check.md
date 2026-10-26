@@ -51,9 +51,9 @@ What comes with it:
   and creates the release as a draft with `force-tag-creation`, so the tag exists while the release
   is still a draft.
 * When a release is created, `.github/workflows/release-please.yml` checks out the tag, runs
-  `./mvnw -B verify` again, attaches `outlook-to-imap-<version>.jar` and its `.sha256`, checks that
-  the jar's `Implementation-Version` equals the version, pushes the multi-arch image, and only then
-  publishes the draft.
+  `./mvnw -B verify` again, attaches `outlook-to-imap-<version>.jar` and its `.sha3-256`, checks
+  that the jar's `Implementation-Version` equals the version, attests the jar, pushes and attests
+  the multi-arch image, and only then publishes the draft.
 * The ruleset "Required merge checks" is active on the default branch, `main`. Every change needs a
   pull request, with 0 approvals and every review thread resolved. Only squash and rebase merges
   are allowed, and the repository settings turn merge commits off too. The project merges by
