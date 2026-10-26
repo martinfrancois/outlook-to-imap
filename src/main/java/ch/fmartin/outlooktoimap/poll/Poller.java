@@ -280,11 +280,9 @@ public final class Poller {
             OptionalLong stored = uid.isPresent()
                     ? (destination.contains(mapping.destinationFolder(), uid.getAsLong()) ? uid : OptionalLong.empty())
                     : destination.find(mapping.destinationFolder(), fingerprint);
-            if (stored.isEmpty()) {
-                throw new DestinationException("destination " + mapping.destination() + " accepted the upload but the message is not in "
-                        + mapping.destinationFolder(), null);
-            }
-            store.markImported(account.name(), message.id(), stored.getAsLong(), clock.instant());
+            long storedUid = stored.orElseThrow(() -> new DestinationException("destination " + mapping.destination()
+                    + " accepted the upload but the message is not in " + mapping.destinationFolder(), null));
+            store.markImported(account.name(), message.id(), storedUid, clock.instant());
             imported++;
         }
 

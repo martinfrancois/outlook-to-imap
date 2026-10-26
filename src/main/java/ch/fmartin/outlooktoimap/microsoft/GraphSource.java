@@ -122,15 +122,7 @@ public final class GraphSource {
     }
 
     private String childFolder(String parentId, String displayName, String source) {
-        MailFolderCollectionResponse page = call(() -> parentId == null
-                ? client.me().mailFolders().get(rc -> {
-                    rc.queryParameters.top = PAGE_SIZE;
-                    rc.queryParameters.select = FOLDER_FIELDS;
-                })
-                : client.me().mailFolders().byMailFolderId(parentId).childFolders().get(rc -> {
-                    rc.queryParameters.top = PAGE_SIZE;
-                    rc.queryParameters.select = FOLDER_FIELDS;
-                }));
+        MailFolderCollectionResponse page = call(() -> firstFolderPage(parentId));
         List<String> found = new ArrayList<>();
         iterate(page, MailFolderCollectionResponse::createFromDiscriminatorValue, (MailFolder folder) -> {
             if (displayName.equalsIgnoreCase(folder.getDisplayName())) {
@@ -145,23 +137,26 @@ public final class GraphSource {
         return found.getFirst();
     }
 
+    /** The top-level folders when {@code parentId} is null, otherwise the children of that folder. */
+    private MailFolderCollectionResponse firstFolderPage(String parentId) {
+        if (parentId == null) {
+            return client.me().mailFolders().get(rc -> {
+                rc.queryParameters.top = PAGE_SIZE;
+                rc.queryParameters.select = FOLDER_FIELDS;
+            });
+        }
+        return client.me().mailFolders().byMailFolderId(parentId).childFolders().get(rc -> {
+            rc.queryParameters.top = PAGE_SIZE;
+            rc.queryParameters.select = FOLDER_FIELDS;
+        });
+    }
+
     /**
      * Pages through one delta round. Without a delta link the round lists the whole folder, which
      * is how the first run picks up the backlog.
      */
     public Changes changes(String folderId, String deltaLink) {
-        DeltaGetResponse first = call(() -> {
-            var delta = client.me().mailFolders().byMailFolderId(folderId).messages().delta();
-            if (deltaLink != null) {
-                delta = delta.withUrl(deltaLink);
-            }
-            return delta.get(rc -> {
-                rc.headers.add("Prefer", PREFER_PAGE_SIZE);
-                if (deltaLink == null) {
-                    rc.queryParameters.select = DELTA_FIELDS;
-                }
-            });
-        });
+        DeltaGetResponse first = call(() -> firstDeltaPage(folderId, deltaLink));
         List<SourceMessage> messages = new ArrayList<>();
         String nextDeltaLink = iterate(first, DeltaGetResponse::createFromDiscriminatorValue, (Message m) -> {
             // Delta also reports messages that left the folder. Copying never deletes, so those
@@ -175,6 +170,19 @@ public final class GraphSource {
             return request;
         });
         return new Changes(messages, nextDeltaLink);
+    }
+
+    private DeltaGetResponse firstDeltaPage(String folderId, String deltaLink) {
+        var delta = client.me().mailFolders().byMailFolderId(folderId).messages().delta();
+        if (deltaLink != null) {
+            delta = delta.withUrl(deltaLink);
+        }
+        return delta.get(rc -> {
+            rc.headers.add("Prefer", PREFER_PAGE_SIZE);
+            if (deltaLink == null) {
+                rc.queryParameters.select = DELTA_FIELDS;
+            }
+        });
     }
 
     /** The message exactly as Microsoft stores it, headers and attachments included. */

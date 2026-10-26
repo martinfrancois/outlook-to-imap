@@ -100,11 +100,8 @@ public final class PollService {
         };
         // The timer covers long stretches without messages, such as listing a big folder while
         // Microsoft throttles; renewing after each message covers the rest.
-        ScheduledExecutorService renewals = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "poll-lease");
-            t.setDaemon(true);
-            return t;
-        });
+        ScheduledExecutorService renewals = Executors.newSingleThreadScheduledExecutor(
+                Thread.ofPlatform().name("poll-lease").daemon(true).factory());
         renewals.scheduleAtFixedRate(renew, leaseRenewal.toMillis(), leaseRenewal.toMillis(), TimeUnit.MILLISECONDS);
         try {
             // Renewing after each message as well notices a lost lease before the next upload,
@@ -130,11 +127,8 @@ public final class PollService {
     }
 
     public void start() {
-        ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1, r -> {
-            Thread t = new Thread(r, "poll");
-            t.setDaemon(false);
-            return t;
-        });
+        ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1,
+                Thread.ofPlatform().name("poll").daemon(false).factory());
         // A stop drops the next scheduled poll instead of running it.
         scheduler.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
         executor = scheduler;

@@ -105,30 +105,37 @@ public final class MicrosoftLogin implements AccessTokens {
     private Optional<IAccount> cachedAccount(Client client, Account account) {
         try {
             return client.app().getAccounts().join().stream()
-                    .filter(a -> a.username() != null && a.username().toLowerCase(Locale.ROOT).equals(account.email().toLowerCase(Locale.ROOT)))
+                    .filter(cached -> isLoginOf(cached, account))
                     .findFirst();
         } catch (CompletionException e) {
             throw new MicrosoftLoginException("cannot read the saved login of account " + account.name(), e.getCause());
         }
     }
 
+    private static boolean isLoginOf(IAccount cached, Account account) {
+        return cached.username() != null
+                && cached.username().toLowerCase(Locale.ROOT).equals(account.email().toLowerCase(Locale.ROOT));
+    }
+
     private Client client(Account account) {
-        return clients.computeIfAbsent(account.name(), name -> {
-            TokenCacheFile cache = new TokenCacheFile(tokenDirectory.resolve(name + ".json"));
-            try {
-                PublicClientApplication.Builder builder = PublicClientApplication.builder(account.clientId())
-                        .authority(authorityHost + account.tenant() + "/")
-                        .setTokenCacheAccessAspect(cache)
-                        .connectTimeoutForDefaultHttpClient(CONNECT_TIMEOUT_MILLIS)
-                        .readTimeoutForDefaultHttpClient(READ_TIMEOUT_MILLIS);
-                if (httpClient != null) {
-                    builder.httpClient(httpClient).instanceDiscovery(false);
-                }
-                return new Client(builder.build(), cache);
-            } catch (MalformedURLException e) {
-                throw new IllegalArgumentException("invalid tenant for account " + name + ": " + account.tenant(), e);
+        return clients.computeIfAbsent(account.name(), name -> newClient(name, account));
+    }
+
+    private Client newClient(String name, Account account) {
+        TokenCacheFile cache = new TokenCacheFile(tokenDirectory.resolve(name + ".json"));
+        try {
+            PublicClientApplication.Builder builder = PublicClientApplication.builder(account.clientId())
+                    .authority(authorityHost + account.tenant() + "/")
+                    .setTokenCacheAccessAspect(cache)
+                    .connectTimeoutForDefaultHttpClient(CONNECT_TIMEOUT_MILLIS)
+                    .readTimeoutForDefaultHttpClient(READ_TIMEOUT_MILLIS);
+            if (httpClient != null) {
+                builder.httpClient(httpClient).instanceDiscovery(false);
             }
-        });
+            return new Client(builder.build(), cache);
+        } catch (MalformedURLException e) {
+            throw new IllegalArgumentException("invalid tenant for account " + name + ": " + account.tenant(), e);
+        }
     }
 
     private record Client(PublicClientApplication app, TokenCacheFile cache) {}
