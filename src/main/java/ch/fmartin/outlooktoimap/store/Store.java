@@ -1,7 +1,10 @@
 package ch.fmartin.outlooktoimap.store;
 
+import static java.util.function.Predicate.not;
+
 import ch.fmartin.outlooktoimap.config.Config.Database;
 import ch.fmartin.outlooktoimap.config.SecretFile;
+import ch.fmartin.outlooktoimap.files.PrivateFiles;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import java.io.IOException;
@@ -11,10 +14,15 @@ import java.nio.file.Path;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.flywaydb.core.Flyway;
 import org.jdbi.v3.core.Jdbi;
+import org.sqlite.SQLiteConfig;
 
 /**
  * Receipts, checkpoints and per-account status in SQLite or PostgreSQL. Flyway creates and
@@ -57,6 +65,11 @@ public final class Store implements AutoCloseable {
     // matches on it, so a sender's over-long Message-ID is cut instead of refused.
     static final int MAX_MESSAGE_ID_LENGTH = 2000;
 
+    // The URL parameters that sqlite-jdbc applies as pragmas and removes from the file name.
+    private static final Set<String> SQLITE_PRAGMAS = Arrays.stream(SQLiteConfig.Pragma.values())
+            .map(pragma -> pragma.pragmaName)
+            .collect(Collectors.toUnmodifiableSet());
+
     private final HikariDataSource dataSource;
     private final Jdbi jdbi;
 
@@ -70,13 +83,15 @@ public final class Store implements AutoCloseable {
         HikariConfig hikari = new HikariConfig();
         hikari.setJdbcUrl(database.url());
         hikari.setPoolName("outlook-to-imap");
+        Optional<Path> newSqliteFile;
         if (database.isSqlite()) {
-            createParentDirectory(database.url().substring(Database.SQLITE_PREFIX.length()));
+            newSqliteFile = prepareSqliteFile(database.url());
             // SQLite locks the whole file per write; waiting beats failing when the health
             // endpoint reads while a poll writes.
             hikari.addDataSourceProperty("busy_timeout", "30000");
             hikari.setMaximumPoolSize(2);
         } else {
+            newSqliteFile = Optional.empty();
             hikari.setMaximumPoolSize(4);
         }
         if (database.username() != null) {
@@ -88,6 +103,7 @@ public final class Store implements AutoCloseable {
         HikariDataSource dataSource = new HikariDataSource(hikari);
         try {
             Flyway.configure().dataSource(dataSource).locations("classpath:db/migration").load().migrate();
+            newSqliteFile.ifPresent(Store::makePrivate);
         } catch (RuntimeException e) {
             dataSource.close();
             throw e;
@@ -95,15 +111,64 @@ public final class Store implements AutoCloseable {
         return new Store(dataSource);
     }
 
-    private static void createParentDirectory(String file) {
-        if (file.isEmpty() || file.startsWith(":memory:") || file.startsWith("file:")) {
-            return;
+    /** Creates the directory of a SQLite database file, and returns the file if it is new. */
+    private static Optional<Path> prepareSqliteFile(String url) {
+        Optional<Path> file = sqliteFile(url);
+        file.ifPresent(Store::createParentDirectory);
+        return file.filter(Files::notExists);
+    }
+
+    /**
+     * The database file of a SQLite URL, empty for an in-memory database or a {@code file:} URI.
+     * SQLite parses a {@code file:} URI itself, so its file is left alone.
+     */
+    private static Optional<Path> sqliteFile(String url) {
+        String file = withoutPragmas(url.substring(Database.SQLITE_PREFIX.length()));
+        if (file.isEmpty() || file.startsWith(":memory:") || file.startsWith("file:") || file.contains("mode=memory")) {
+            return Optional.empty();
         }
-        Path parent = Path.of(file).toAbsolutePath().getParent();
+        return Optional.of(Path.of(file).toAbsolutePath());
+    }
+
+    /**
+     * The file name sqlite-jdbc opens: it applies each URL parameter named after a pragma, such as
+     * {@code journal_mode=WAL}, and keeps the others as part of the name, last one first. This
+     * follows {@code SQLiteConnection.extractPragmasFromFilename}, which is not public.
+     */
+    private static String withoutPragmas(String address) {
+        int query = address.indexOf('?');
+        if (query < 0) {
+            return address;
+        }
+        String file = address.substring(0, query);
+        String kept = Arrays.asList(address.substring(query + 1).split("&")).reversed().stream()
+                .map(String::trim)
+                .filter(not(String::isEmpty))
+                .filter(not(Store::isPragma))
+                .collect(Collectors.joining("&"));
+        return kept.isEmpty() ? file : file + "?" + kept;
+    }
+
+    private static boolean isPragma(String parameter) {
+        return SQLITE_PRAGMAS.contains(parameter.split("=")[0].trim().toLowerCase(Locale.ROOT));
+    }
+
+    // The receipts describe the owner's mail, so other users on the host must not read them.
+    private static void createParentDirectory(Path file) {
+        Path parent = file.getParent();
         try {
-            Files.createDirectories(parent);
+            PrivateFiles.createDirectories(parent);
         } catch (IOException e) {
             throw new UncheckedIOException("cannot create database directory " + parent, e);
+        }
+    }
+
+    // SQLite creates its journal and WAL files with the mode of the database file.
+    private static void makePrivate(Path file) {
+        try {
+            PrivateFiles.restrict(file);
+        } catch (IOException e) {
+            throw new UncheckedIOException("cannot make database " + file + " private", e);
         }
     }
 

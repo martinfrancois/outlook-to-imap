@@ -1,18 +1,24 @@
 package ch.fmartin.outlooktoimap.store;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import ch.fmartin.outlooktoimap.Databases;
 import ch.fmartin.outlooktoimap.Databases.Engine;
 import ch.fmartin.outlooktoimap.config.Config.Database;
+import ch.fmartin.outlooktoimap.files.PrivateFiles;
 import ch.fmartin.outlooktoimap.store.Store.AccountStatus;
 import ch.fmartin.outlooktoimap.store.Store.Checkpoint;
 import ch.fmartin.outlooktoimap.store.Store.Receipt;
 import ch.fmartin.outlooktoimap.store.Store.State;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
 class StoreTest {
@@ -87,6 +93,17 @@ class StoreTest {
         }
     }
 
+    @Test
+    void aNewSqliteDatabaseAndItsDirectoryAreReadableOnlyByTheirOwner() throws Exception {
+        assumeTrue(PrivateFiles.supported());
+        Path file = directory.resolve("state/outlook-to-imap.db");
+
+        try (Store store = Store.open(new Database(Database.SQLITE_PREFIX + file, null, null))) {
+            assertThat(Files.getPosixFilePermissions(file.getParent())).isEqualTo(PosixFilePermissions.fromString("rwx------"));
+            assertThat(Files.getPosixFilePermissions(file)).isEqualTo(PosixFilePermissions.fromString("rw-------"));
+        }
+    }
+
     @ParameterizedTest
     @MethodSource("engines")
     void checkpointsArePerAccountAndFolder(Engine engine) {
@@ -138,6 +155,21 @@ class StoreTest {
             store.releaseLease("c");
             assertThat(store.renewLease("c", T0.plusSeconds(2100))).isFalse();
             assertThat(store.acquireLease("d", T0.plusSeconds(1000), T0.plusSeconds(1900))).isTrue();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        // sqlite-jdbc applies a pragma and drops it from the file name, but keeps anything else.
+        "outlook-to-imap.db?journal_mode=WAL, outlook-to-imap.db",
+        "outlook-to-imap.db?a=1&journal_mode=WAL&b=2, outlook-to-imap.db?b=2&a=1",
+    })
+    void aSqliteUrlWithParametersMakesTheFileItOpensPrivate(String address, String fileName) throws Exception {
+        assumeTrue(PrivateFiles.supported());
+        Path state = directory.resolve("state");
+
+        try (Store store = Store.open(new Database(Database.SQLITE_PREFIX + state.resolve(address), null, null))) {
+            assertThat(Files.getPosixFilePermissions(state.resolve(fileName))).isEqualTo(PosixFilePermissions.fromString("rw-------"));
         }
     }
 

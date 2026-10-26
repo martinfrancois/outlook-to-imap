@@ -1,16 +1,15 @@
 package ch.fmartin.outlooktoimap.microsoft;
 
+import ch.fmartin.outlooktoimap.files.PrivateFiles;
 import com.microsoft.aad.msal4j.ITokenCacheAccessAspect;
 import com.microsoft.aad.msal4j.ITokenCacheAccessContext;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.attribute.PosixFilePermissions;
 
 /**
  * Keeps one account's MSAL token cache in a file readable only by its owner. Every refresh hands
@@ -19,8 +18,6 @@ import java.nio.file.attribute.PosixFilePermissions;
  */
 // Not final, so a test can make a write fail through a subclass.
 class TokenCacheFile implements ITokenCacheAccessAspect {
-
-    private static final boolean POSIX = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
 
     private final Path file;
 
@@ -58,18 +55,10 @@ class TokenCacheFile implements ITokenCacheAccessAspect {
     private void write(String content) {
         try {
             Path directory = file.getParent();
-            if (POSIX) {
-                Files.createDirectories(directory, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
-            } else {
-                Files.createDirectories(directory);
-            }
+            PrivateFiles.createDirectories(directory);
             // A unique name, because a dry run or authorize can refresh the same login while the
             // service does.
-            String prefix = file.getFileName() + ".";
-            Path temporary = POSIX
-                    ? Files.createTempFile(directory, prefix, ".tmp",
-                            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
-                    : Files.createTempFile(directory, prefix, ".tmp");
+            Path temporary = PrivateFiles.createTempFile(directory, file.getFileName() + ".", ".tmp");
             try {
                 Files.writeString(temporary, content, StandardCharsets.UTF_8);
                 try {

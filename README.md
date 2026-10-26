@@ -210,6 +210,10 @@ java -jar outlook-to-imap.jar --config config.yaml run
 It needs Java 21 or newer. CI tests every Java LTS release from 21 up. The state directory defaults
 to `data` next to the configuration file.
 
+Run `umask 077` before you create the configuration, the password files or the state directory, as
+in the Docker steps. The service creates a missing state directory and a new SQLite database
+readable only by your user, but a directory you created first keeps the mode your umask gave it.
+
 ### Commands
 
 | Command | What it does | Exit code |
@@ -446,6 +450,15 @@ The state directory holds:
 - `outlook-to-imap.db`: the SQLite database, unless `database.url` points elsewhere. It holds one
   receipt per copied message (Microsoft id, destination, hash, size, times; no content), each
   folder's position, and the last poll's status.
+
+The service creates a missing state directory with mode 700 and a new SQLite database with mode 600,
+so other users on the host can read neither. A directory or database that already exists keeps its
+mode; `chmod 700` and `chmod 600` fix one created by version 1.0.0 or by hand.
+
+These modes need a file system with POSIX modes. On one without, such as on Windows, the service
+sets no mode on the state directory, the token files or the database; restrict them with the
+system's own access rules. A database given as a `jdbc:sqlite:file:` URI also keeps the mode it gets,
+because SQLite reads that URI itself.
 
 The database is the only record of what was copied. Lose it, and the next poll copies everything
 still in the source folders again. Back it up with the token files.
