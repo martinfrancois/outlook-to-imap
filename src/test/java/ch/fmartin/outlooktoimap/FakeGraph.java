@@ -105,6 +105,12 @@ public final class FakeGraph implements AutoCloseable {
                         .withBody("{\"error\":{\"code\":\"SyncStateNotFound\",\"message\":\"expired\"}}")));
     }
 
+    /** Lists one folder at the top of the account, as the first step of a folder path lookup. */
+    public void topLevelFolder(String id, String displayName) {
+        server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders"))
+                .willReturn(okJson(Map.of("value", List.of(Map.of("id", id, "displayName", displayName))))));
+    }
+
     public void mime(String id, byte[] content) {
         server.stubFor(get(urlPathEqualTo("/v1.0/me/messages/" + id + "/$value"))
                 .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "text/plain").withBody(content)));

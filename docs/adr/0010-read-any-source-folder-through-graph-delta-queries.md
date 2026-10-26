@@ -60,6 +60,11 @@ The rules:
 * Without a saved delta link the round lists the whole folder, which is how the first poll copies
   the backlog. A 410, `SyncStateNotFound` or `resyncRequired` reply raises `DeltaExpiredException`
   and the folder is read again from the start; receipts skip what was already copied.
+* A 404 on a folder request (listing child folders, the first delta request without a link, a
+  later page of either) raises `FolderNotFoundException`, whose message tells the user to correct or
+  remove the source. Only `mime` and `moveToDeletedItems` turn a 404 into `MessageGoneException`,
+  which skips the message. A 404 on a saved delta link rereads the folder, see
+  [ADR 0026](0026-reread-a-folder-whose-saved-delta-link-answers-404.md).
 * The delta link is saved as the checkpoint of the account and source folder only when the round
   had no failed message, was not interrupted and was not a dry run. A failed message is therefore
   seen again on the next poll.
@@ -73,16 +78,20 @@ The rules:
 * Bad, because one failed message makes the next poll read the whole delta round of that folder
   again. Receipts skip the rest, at the cost of a few listing requests.
 * Bad, because a subfolder created later in Outlook is not copied until someone adds a mapping.
-* Neutral, because an unknown folder path fails that mapping only, with `FolderNotFoundException`.
-  A folder that disappears between polls is currently reported with the wrong message, see
-  [outlook-to-imap issue #25](https://github.com/martinfrancois/outlook-to-imap/issues/25).
+* Neutral, because an unknown folder path, or a folder that disappears between polls, fails that
+  mapping only, with `FolderNotFoundException` and the source named in the account error.
 
 ### Confirmation
 
 `GraphSourceTest` runs against WireMock as Graph:
 `asksForImmutableIdsAndLeavesOutMessagesThatLeftTheFolder`,
 `pagesThroughTheWholeFolderAndReturnsTheDeltaLink`, `reportsAnExpiredDeltaLink`,
-`resolvesWellKnownNamesWithoutAsking` and `resolvesAFolderPathByDisplayNameAcrossPages`.
+`resolvesWellKnownNamesWithoutAsking`, `resolvesAFolderPathByDisplayNameAcrossPages`,
+`reportsAFolderThatIsGoneInsteadOfAMissingMessage`, `reportsAFolderThatIsGoneOnALaterDeltaPage`,
+`reportsAParentFolderThatIsGoneDuringTheLookup` and
+`reportsAParentFolderThatIsGoneOnALaterPageOfItsChildren`.
+`PollerTest.aSourceFolderThatIsGoneIsNamedInTheAccountError` and
+`PollerTest.aFolderOnTheSourcePathThatIsGoneIsNamedInTheAccountError` check the 404 rules.
 `PollerTest.oneBadMessageDoesNotStopTheOthersAndIsRetriedNextPoll` checks the checkpoint rule and
 `StoreTest.checkpointsArePerAccountAndFolder` the checkpoint key. There is no SMTP code in the
 repository.
@@ -144,6 +153,15 @@ The owner asked about any source folder on 2026-10-26, and asked that the README
 example. The agent answered that the change was small; the per-folder checkpoints and immutable ids
 came with it. The first design keyed receipts per folder mapping; that changed to one receipt per
 account, see [ADR 0004](0004-one-copy-per-account-and-removal-trusts-the-receipt.md).
+
+A 404 from Graph means "not found" for a message and for a folder alike, with the error code
+`ErrorItemNotFound`. The first version turned every 404 into `MessageGoneException`, so a folder
+that was gone showed up as "junkemail: message no longer exists"
+([outlook-to-imap issue #25](https://github.com/martinfrancois/outlook-to-imap/issues/25)). Each
+request now says what its 404 means. Graph reports an expired delta token differently, with 410 or
+the code `syncStateNotFound`
+([delta query overview](https://learn.microsoft.com/en-us/graph/delta-query-overview#token-duration)),
+and that check runs before the 404 one.
 
 How the service waits when Graph throttles these requests is in
 [ADR 0007](0007-throttled-accounts-wait-for-the-next-poll.md). The service shipped with

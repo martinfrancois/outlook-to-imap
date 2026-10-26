@@ -201,7 +201,7 @@ public final class Poller {
             try {
                 changes = source.changes(folderId, deltaLink);
             } catch (DeltaExpiredException e) {
-                LOG.info("account {}: delta link for {} expired, rereading the whole folder", account.name(), mapping.source());
+                LOG.info("account {}: {}: {}, rereading the whole folder", account.name(), mapping.source(), e.getMessage());
                 changes = source.changes(folderId, null);
             }
             int failedBefore = failed;

@@ -67,6 +67,8 @@ Failure isolation (`Poller`):
   skipped.
 * An unreachable destination fails that folder mapping and drops that connection. An unreadable
   destination password file counts as an unreachable destination.
+* A source folder that Microsoft no longer has fails that folder mapping, with the configured
+  source in the error.
 * A throttled account, or one that needs a new login, ends that account's poll. A token check runs
   first, so a missing login fails before any folder work.
 * The next account always runs.
@@ -88,6 +90,7 @@ Failure isolation (`Poller`):
 `PollServiceTest.healthFollowsPollProgressAndTheEndpointShowsEachAccount`,
 `aSuccessfulPollPingsTheHeartbeat` and `aFailedAccountPingsTheFailureUrlWithTheReason`. In
 `PollerTest`: `oneBadMessageDoesNotStopTheOthersAndIsRetriedNextPoll`,
+`aSourceFolderThatIsGoneIsNamedInTheAccountError`,
 `anAccountThatNeedsANewLoginDoesNotStopTheOtherAccount` and
 `aThrottledAccountWaitsForTheNextPollWhileTheOtherAccountContinues`.
 `ImapDestinationTest.anUnreadablePasswordFileMakesOnlyThisDestinationUnavailable`.

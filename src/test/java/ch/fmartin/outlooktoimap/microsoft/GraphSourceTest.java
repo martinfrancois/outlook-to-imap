@@ -31,6 +31,8 @@ import org.junit.jupiter.api.Test;
 
 class GraphSourceTest {
 
+    private static final String FOLDER_GONE = "Microsoft says this folder no longer exists.";
+
     private final FakeGraph graph = new FakeGraph();
 
     @AfterEach
@@ -77,6 +79,62 @@ class GraphSourceTest {
 
         assertThatThrownBy(() -> graph.source().changes("junkemail", graph.deltaLink("junkemail", "old")))
                 .isInstanceOf(DeltaExpiredException.class);
+    }
+
+    @Test
+    void reportsADeltaLinkToAFolderThatIsGoneAsExpired() {
+        graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders/f-old/messages/delta()"))
+                .willReturn(FakeGraph.error(404, "ErrorItemNotFound")));
+
+        assertThatThrownBy(() -> graph.source().changes("f-old", graph.deltaLink("f-old", "t1")))
+                .isInstanceOf(DeltaExpiredException.class);
+    }
+
+    @Test
+    void reportsAFolderThatIsGoneInsteadOfAMissingMessage() {
+        graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders/archive/messages/delta()"))
+                .willReturn(FakeGraph.error(404, "ErrorItemNotFound")));
+
+        assertThatThrownBy(() -> graph.source().changes("archive", null)).isInstanceOf(FolderNotFoundException.class)
+                .hasMessageStartingWith(FOLDER_GONE);
+    }
+
+    @Test
+    void reportsAFolderThatIsGoneOnALaterDeltaPage() {
+        graph.deltaRound("f-p", "t1", "t2", List.of(List.of(Item.of("m1")), List.of(Item.of("m2"))));
+        graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders/f-p/messages/delta()"))
+                .withQueryParam("$skiptoken", equalTo("t1-page1"))
+                .atPriority(1)
+                .willReturn(FakeGraph.error(404, "ErrorItemNotFound")));
+
+        // The SDK's PageIterator requests later pages without Graph's error mapping, so only the
+        // status says what happened.
+        assertThatThrownBy(() -> graph.source().changes("f-p", graph.deltaLink("f-p", "t1")))
+                .isInstanceOf(FolderNotFoundException.class)
+                .hasMessageStartingWith(FOLDER_GONE);
+    }
+
+    @Test
+    void reportsAParentFolderThatIsGoneDuringTheLookup() {
+        graph.topLevelFolder("f-p", "Projects");
+        graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders/f-p/childFolders"))
+                .willReturn(FakeGraph.error(404, "ErrorItemNotFound")));
+
+        assertThatThrownBy(() -> graph.source().resolveFolder("Projects/2026")).isInstanceOf(FolderNotFoundException.class)
+                .hasMessageStartingWith(FOLDER_GONE);
+    }
+
+    @Test
+    void reportsAParentFolderThatIsGoneOnALaterPageOfItsChildren() {
+        graph.topLevelFolder("f-p", "Projects");
+        graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders/f-p/childFolders")).willReturn(FakeGraph.okJson(Map.of(
+                "value", List.of(Map.of("id", "f-2025", "displayName", "2025")),
+                "@odata.nextLink", graph.server.baseUrl() + "/v1.0/me/mailFolders/f-p/childFolders?$skiptoken=2"))));
+        graph.server.stubFor(get(urlPathEqualTo("/v1.0/me/mailFolders/f-p/childFolders")).withQueryParam("$skiptoken", equalTo("2"))
+                .willReturn(FakeGraph.error(404, "ErrorItemNotFound")));
+
+        assertThatThrownBy(() -> graph.source().resolveFolder("Projects/2026")).isInstanceOf(FolderNotFoundException.class)
+                .hasMessageStartingWith(FOLDER_GONE);
     }
 
     @Test
