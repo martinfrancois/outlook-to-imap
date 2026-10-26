@@ -49,7 +49,7 @@ jobs:
         env:
           VERSION: ${{ steps.release.outputs.version }}
         run: |
-          mvn -B verify
+          ./mvnw -B verify
           mkdir dist
           cp target/outlook-to-imap.jar "dist/outlook-to-imap-${VERSION}.jar"
           (cd dist && sha256sum "outlook-to-imap-${VERSION}.jar" > "outlook-to-imap-${VERSION}.jar.sha256")

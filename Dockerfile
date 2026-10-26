@@ -1,18 +1,20 @@
-# Builds the same shaded jar as `mvn package` and runs it on a Java 25 runtime.
-FROM docker.io/library/maven:3.9.16-eclipse-temurin-25@sha256:93b8a14ea2f412782e4e842651273b4d903e35cc496284f178fbbe2d67d00976 AS build
+# Builds the same shaded jar as `./mvnw package` and runs it on a Java 25 runtime.
+FROM docker.io/library/eclipse-temurin:25-jdk@sha256:2d5d5e9b533342a565907c84f47a2ec298c40cde7b13a3ca85d4950fa456a641 AS build
 WORKDIR /src
-COPY pom.xml .
-RUN mvn -B -q dependency:go-offline
+# The wrapper pins the Maven version, so the image builds with the same Maven as CI.
+COPY mvnw pom.xml ./
+COPY .mvn ./.mvn
+RUN ./mvnw -B -q dependency:go-offline
 COPY src ./src
 # CI runs the tests; the image build only packages.
-RUN mvn -B -q package -DskipTests -Djacoco.skip=true
+RUN ./mvnw -B -q package -DskipTests -Djacoco.skip=true
 
 FROM docker.io/library/eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165b95112372ad0d67e87f
 # curl runs the health check below.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --uid 10001 --user-group --home-dir /data --shell /usr/sbin/nologin outlook-to-imap \
+    && useradd --uid 10001 --user-group --home-dir /data --shell /usr/sbin/nologin outlook-to-imap \
     && mkdir -p /data /config \
     && chown outlook-to-imap:outlook-to-imap /data \
     && chmod 700 /data
