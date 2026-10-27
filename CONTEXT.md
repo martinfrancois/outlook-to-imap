@@ -64,5 +64,6 @@ One pass over every folder mapping of every source account.
 _Avoid_: sync, run, job
 
 **Checkpoint**:
-How far a folder mapping has read its source folder, so the next poll reads only what changed.
+Which source folder a folder mapping reads and how far it has read it, so the next poll reads only
+what changed.
 _Avoid_: cursor, watermark, sync token
