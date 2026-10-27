@@ -197,6 +197,12 @@ public final class Poller {
                 LOG.info("account {}: removal switched on for {}, rereading the whole folder", account.name(), mapping.source());
                 deltaLink = null;
             }
+            // Without this reread, the poll would keep reading a deleted folder and never the new one with its name, see docs/adr/0027-a-checkpoint-remembers-the-folder-its-delta-link-reads.md
+            if (checkpoint.map(c -> !c.readsFolder(folderId)).orElse(false)) {
+                LOG.info("account {}: {} is not known to be the folder its checkpoint reads, rereading the whole folder",
+                        account.name(), mapping.source());
+                deltaLink = null;
+            }
             Changes changes;
             try {
                 changes = source.changes(folderId, deltaLink);
@@ -228,8 +234,8 @@ public final class Poller {
             // Saving after a failed message would start the next round past it, and the next poll would not see it again, see docs/adr/0010-read-any-source-folder-through-graph-delta-queries.md
             // Everything that already succeeded is skipped by its receipt.
             if (!dryRun && !interrupted && failed == failedBefore) {
-                store.saveCheckpoint(account.name(), mapping.source(), changes.deltaLink(), mapping.removeSourceAfterSync(),
-                        clock.instant());
+                store.saveCheckpoint(account.name(), mapping.source(),
+                        new Store.Checkpoint(folderId, changes.deltaLink(), mapping.removeSourceAfterSync()), clock.instant());
             }
         }
 

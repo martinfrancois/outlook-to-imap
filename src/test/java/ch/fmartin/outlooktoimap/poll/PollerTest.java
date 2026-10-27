@@ -34,6 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -470,6 +471,63 @@ class PollerTest {
         assertThat(result.counts()).isEqualTo(new Counts(1, 0, 1, 0));
         assertThat(fastmail.messages(JUNK)).hasSize(2);
         assertThat(store.checkpoint("hotmail", "Projects").get().deltaLink()).isEqualTo(graph.deltaLink("f-new", "n1"));
+    }
+
+    @Test
+    void aFolderDeletedAndCreatedAgainUnderTheSameNameIsReadFromTheStart() {
+        open(Engine.SQLITE);
+        graph.mime("m1", TestMessages.mime("m1"));
+        graph.topLevelFolder("f-old", "Projects");
+        graph.deltaRound("f-old", null, "t1", List.of(List.of(Item.of("m1"))));
+        Config config = config(account("hotmail", "Projects", false));
+        poll(config);
+        assertThat(store.checkpoint("hotmail", "Projects").get().folderId()).isEqualTo("f-old");
+
+        // The old folder sits in Deleted Items with its id, so its saved link still answers, and a
+        // new folder took its name.
+        graph.server.resetMappings();
+        graph.server.resetRequests();
+        graph.mime("m2", TestMessages.mime("m2"));
+        graph.mime("m3", TestMessages.mime("m3"));
+        graph.topLevelFolder("f-new", "Projects");
+        graph.deltaRound("f-old", "t1", "t2", List.of(List.of(Item.of("m3"))));
+        graph.deltaRound("f-new", null, "n1", List.of(List.of(Item.of("m2"))));
+        AccountResult result = poll(config).accounts().getFirst();
+
+        assertThat(result.error()).isNull();
+        assertThat(result.counts()).isEqualTo(new Counts(1, 0, 0, 0));
+        assertThat(store.receipt("hotmail", "m2")).isPresent();
+        assertThat(store.receipt("hotmail", "m3")).isEmpty();
+        graph.server.verify(0, getRequestedFor(urlPathEqualTo("/v1.0/me/mailFolders/f-old/messages/delta()")));
+        assertThat(store.checkpoint("hotmail", "Projects").get())
+                .isEqualTo(new Store.Checkpoint("f-new", graph.deltaLink("f-new", "n1"), false));
+    }
+
+    @Test
+    void aCheckpointWithoutAFolderIdRereadsTheFolderOnceThenFollowsItsDeltaLinks() {
+        open(Engine.SQLITE);
+        graph.mime("m1", TestMessages.mime("m1"));
+        graph.mime("m2", TestMessages.mime("m2"));
+        graph.topLevelFolder("f-p", "Projects");
+        graph.deltaRound("f-p", null, "n1", List.of(List.of(Item.of("m1"))));
+        graph.deltaRound("f-p", "n1", "n2", List.of(List.of(Item.of("m2"))));
+        Config config = config(account("hotmail", "Projects", false));
+        poll(config);
+        // As saved before checkpoints stored their folder: the link reads a folder deleted since,
+        // which still answers from Deleted Items.
+        store.saveCheckpoint("hotmail", "Projects", new Store.Checkpoint(null, graph.deltaLink("f-old", "t1"), false),
+                Instant.EPOCH);
+        graph.mime("m3", TestMessages.mime("m3"));
+        graph.deltaRound("f-old", "t1", "t2", List.of(List.of(Item.of("m3"))));
+
+        AccountResult reread = poll(config).accounts().getFirst();
+        AccountResult next = poll(config).accounts().getFirst();
+
+        assertThat(reread.counts()).isEqualTo(new Counts(0, 0, 1, 0));
+        assertThat(next.counts()).isEqualTo(new Counts(1, 0, 0, 0));
+        graph.server.verify(0, getRequestedFor(urlPathEqualTo("/v1.0/me/mailFolders/f-old/messages/delta()")));
+        assertThat(store.checkpoint("hotmail", "Projects").get())
+                .isEqualTo(new Store.Checkpoint("f-p", graph.deltaLink("f-p", "n2"), false));
     }
 
     @Test
