@@ -57,9 +57,9 @@ expired link. A 404 on that request, or on any later page, raises `FolderNotFoun
   succeeds, with no manual step.
 * Good, because the receipts skip every message already copied, so the reread copies nothing twice.
 * Bad, because a source that finds no folder costs one extra request before the mapping fails.
-* Neutral, because a folder deleted and created again under the same name is not covered: the old
-  folder keeps its id in Deleted Items, its saved link answers 200, and the poll keeps reading it.
-  That is [outlook-to-imap issue #34](https://github.com/martinfrancois/outlook-to-imap/issues/34).
+* Neutral, because a folder deleted and created again under the same name is not covered here: the
+  old folder keeps its id in Deleted Items and its saved link answers 200.
+  [ADR 0027](0027-a-checkpoint-remembers-the-folder-its-delta-link-reads.md) covers it.
 
 ### Confirmation
 
@@ -105,6 +105,6 @@ The first draft of this choice in
 [outlook-to-imap pull request #32](https://github.com/martinfrancois/outlook-to-imap/pull/32)
 explained a 404 on the saved link as a folder deleted and created again under the same name. Review
 found that wrong, because such a folder keeps its id and its saved link keeps answering 200.
-[outlook-to-imap issue #34](https://github.com/martinfrancois/outlook-to-imap/issues/34) plans to
-store the resolved folder id with the checkpoint for that case. The reread stays useful after that
-fix, because a checkpoint whose folder is gone for good still answers 404.
+[ADR 0027](0027-a-checkpoint-remembers-the-folder-its-delta-link-reads.md) stores the resolved
+folder id with the checkpoint for that case. The reread stays useful next to it, because a
+checkpoint whose folder is gone for good still answers 404.

@@ -67,7 +67,8 @@ The rules:
   [ADR 0026](0026-reread-a-folder-whose-saved-delta-link-answers-404.md).
 * The delta link is saved as the checkpoint of the account and source folder only when the round
   had no failed message, was not interrupted and was not a dry run. A failed message is therefore
-  seen again on the next poll.
+  seen again on the next poll. The checkpoint also stores the id of the folder the link reads, see
+  [ADR 0027](0027-a-checkpoint-remembers-the-folder-its-delta-link-reads.md).
 
 ### Consequences
 
