@@ -61,6 +61,7 @@ class TokenCacheFile implements ITokenCacheAccessAspect {
             Path temporary = PrivateFiles.createTempFile(directory, file.getFileName() + ".", ".tmp");
             try {
                 Files.writeString(temporary, content, StandardCharsets.UTF_8);
+                // Writing the file in place could leave half a token cache after a crash, and the account would need a new login, see docs/adr/0008-device-code-sign-in-with-a-private-token-file-per-account.md
                 try {
                     Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
                 } catch (AtomicMoveNotSupportedException e) {

@@ -19,6 +19,7 @@ import org.eclipse.angus.mail.util.CRLFOutputStream;
  */
 public record Fingerprint(String messageId, String date, String contentHash, long size) {
 
+    // Another algorithm would no longer match the hashes PENDING receipts recorded, and those messages would be uploaded twice, see docs/adr/0014-verify-each-upload-and-settle-unknown-ones-by-content.md
     private static final String HASH_ALGORITHM = "SHA3-256";
 
     /**

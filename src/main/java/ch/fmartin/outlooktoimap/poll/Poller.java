@@ -148,7 +148,7 @@ public final class Poller {
 
         AccountResult execute() {
             try {
-                // Fails fast with a clear message when the login is gone, before any folder work.
+                // Its result is unused: it makes a missing login fail the account before any folder work, see docs/adr/0016-monitoring-and-failure-isolation.md
                 tokens.accessToken(account);
                 GraphSource source = sources.apply(account);
                 for (FolderMapping mapping : account.folders()) {
@@ -162,6 +162,7 @@ public final class Poller {
                         connections.drop(e.destination());
                         fail(mapping.source() + ": " + e.getMessage(), e);
                     } catch (ThrottledException | ReauthorizationRequiredException e) {
+                        // Throttling or a lost login ends this account's poll, since every remaining folder would fail the same way, see docs/adr/0016-monitoring-and-failure-isolation.md
                         throw e;
                     } catch (GraphException | DestinationException e) {
                         fail(mapping.source() + ": " + e.getMessage(), e);
@@ -192,8 +193,7 @@ public final class Poller {
             Optional<Store.Checkpoint> checkpoint = store.checkpoint(account.name(), mapping.source());
             String deltaLink = checkpoint.map(Store.Checkpoint::deltaLink).orElse(null);
             if (mapping.removeSourceAfterSync() && checkpoint.map(c -> !c.removalEnabled()).orElse(false)) {
-                // Removal was just switched on: list the folder from the start, so messages copied
-                // while it was off leave the source too.
+                // Without this reread, messages copied while removal was off would stay in the source, see docs/adr/0004-one-copy-per-account-and-removal-trusts-the-receipt.md
                 LOG.info("account {}: removal switched on for {}, rereading the whole folder", account.name(), mapping.source());
                 deltaLink = null;
             }
@@ -225,8 +225,8 @@ public final class Poller {
                 }
                 progress.run();
             }
-            // A failed message keeps the checkpoint where it was, so the next poll sees the message
-            // again. Everything that already succeeded is skipped by its receipt.
+            // Saving after a failed message would start the next round past it, and the next poll would not see it again, see docs/adr/0010-read-any-source-folder-through-graph-delta-queries.md
+            // Everything that already succeeded is skipped by its receipt.
             if (!dryRun && !interrupted && failed == failedBefore) {
                 store.saveCheckpoint(account.name(), mapping.source(), changes.deltaLink(), mapping.removeSourceAfterSync(),
                         clock.instant());
@@ -243,6 +243,7 @@ public final class Poller {
         private void copyMessage(GraphSource source, FolderMapping mapping, SourceMessage message) {
             Optional<Receipt> receipt = store.receipt(account.name(), message.id());
             State state = receipt.map(Receipt::state).orElse(null);
+            // Uploading an IMPORTED or REMOVED message again would bring back copies the user deleted at the destination, see docs/adr/0004-one-copy-per-account-and-removal-trusts-the-receipt.md
             if (state == State.REMOVED || (state == State.IMPORTED && !mapping.removeSourceAfterSync())) {
                 skipped++;
                 return;
@@ -261,6 +262,7 @@ public final class Poller {
             if (state != State.IMPORTED) {
                 upload(source, mapping, message, receipt.orElse(null));
             }
+            // Reached only once the destination shows the copy; removing any earlier could lose a message whose upload failed, see docs/adr/0004-one-copy-per-account-and-removal-trusts-the-receipt.md
             if (mapping.removeSourceAfterSync()) {
                 try {
                     source.moveToDeletedItems(message.id());
@@ -280,12 +282,13 @@ public final class Poller {
                 return;
             }
             DestinationConnection destination = connections.get(mapping.destination());
+            // Without a PENDING receipt before the first byte, an upload whose reply was lost would be uploaded again, see docs/adr/0014-verify-each-upload-and-settle-unknown-ones-by-content.md
             store.savePending(new Receipt(account.name(), message.id(), State.PENDING, mapping.source(), mapping.destination(),
                     mapping.destinationFolder(), message.internetMessageId(), fingerprint.contentHash(), fingerprint.size(), null,
                     clock.instant(), null, null, null));
             Date received = message.receivedDateTime() == null ? null : Date.from(message.receivedDateTime().toInstant());
             OptionalLong uid = destination.append(mapping.destinationFolder(), mime, received);
-            // The receipt only says IMPORTED once the server shows the copy, not when it says OK.
+            // Trusting the server's OK instead of the listed copy could remove a source message whose copy is not there, see docs/adr/0014-verify-each-upload-and-settle-unknown-ones-by-content.md
             OptionalLong stored = uid.isPresent()
                     ? (destination.contains(mapping.destinationFolder(), uid.getAsLong()) ? uid : OptionalLong.empty())
                     : destination.find(mapping.destinationFolder(), fingerprint);
@@ -308,6 +311,7 @@ public final class Poller {
             }
             OptionalLong found;
             try {
+                // A fresh download's hash would miss a copy whose bytes Microsoft now serves differently, and upload it twice, see docs/adr/0014-verify-each-upload-and-settle-unknown-ones-by-content.md
                 found = connections.get(pending.destination())
                         .find(pending.destinationFolder(), current.withContent(pending.contentHash(), pending.sizeBytes()));
             } catch (DestinationUnavailableException e) {

@@ -20,7 +20,7 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.dataformat.yaml.YAMLMapper;
 
-/** Keeps every decision record under docs/adr in the MADR 4 shape that AGENTS.md describes. */
+/** Without this test a decision record that leaves the MADR 4 shape AGENTS.md describes goes unnoticed, see docs/adr/0006-record-decisions-as-madr-4.md. */
 class AdrConformanceTest {
 
     private static final Path ADR_DIRECTORY = Path.of("docs", "adr");

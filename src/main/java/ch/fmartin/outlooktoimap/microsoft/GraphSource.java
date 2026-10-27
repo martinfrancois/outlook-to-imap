@@ -51,7 +51,7 @@ public final class GraphSource {
             "junkemail", "localfailures", "msgfolderroot", "outbox", "recoverableitemsdeletions",
             "scheduled", "searchfolders", "sentitems", "serverfailures", "syncissues");
 
-    // Immutable ids survive moves between folders, so one message keeps one receipt.
+    // Without immutable ids a message moved between folders gets a new id and is copied again, see docs/adr/0010-read-any-source-folder-through-graph-delta-queries.md
     private static final String IMMUTABLE_IDS = "IdType=\"ImmutableId\"";
     // Graph's largest page for messages, so a big backlog needs the fewest requests.
     private static final int PAGE_SIZE = 100;
@@ -60,8 +60,8 @@ public final class GraphSource {
     private static final String[] DELTA_FIELDS = {"id", "internetMessageId", "receivedDateTime"};
     private static final String CORRECT_THE_SOURCE = "correct or remove this source under accounts[].folders[] in the configuration";
 
-    // Retries per request after a throttling or server error. Each waits for Retry-After, or backs
-    // off exponentially, capped at RetryHandlerOption.MAX_DELAY seconds either way.
+    // The SDK's default of 3 ends a throttled account's poll after fewer waits, and the rest of its backlog waits a whole interval, see docs/adr/0007-throttled-accounts-wait-for-the-next-poll.md
+    // Each retry waits for Retry-After, or backs off exponentially, capped at RetryHandlerOption.MAX_DELAY seconds either way.
     static final int MAX_RETRIES = 5;
 
     private final GraphServiceClient client;
@@ -100,13 +100,13 @@ public final class GraphSource {
     }
 
     /**
-     * The SDK's client with its retry handler, plus the immutable-id header. The SDK's overall
-     * call timeout would also cover the retry handler's waits, which honour Retry-After and can add
-     * up to several minutes, so it is lifted; the per-attempt connect and read timeouts stay.
+     * The SDK's client with its retry handler, plus the immutable-id header. Only the overall call
+     * timeout is lifted; the per-attempt connect and read timeouts stay.
      */
     static OkHttpClient httpClient(RetryHandlerOption retry) {
         return GraphClientFactory.create(new RequestOption[] {retry})
                 .addInterceptor(chain -> chain.proceed(chain.request().newBuilder().addHeader("Prefer", IMMUTABLE_IDS).build()))
+                // The call timeout covers the retry handler's waits, so the SDK's 100 seconds would cut a Retry-After wait short, see docs/adr/0007-throttled-accounts-wait-for-the-next-poll.md
                 .callTimeout(Duration.ZERO)
                 .build();
     }
@@ -261,6 +261,7 @@ public final class GraphSource {
         if (status == 404 || "ErrorItemNotFound".equals(code)) {
             return notFound.apply(e);
         }
+        // As a plain GraphException a throttled account would go on to its next folder and be throttled again, see docs/adr/0007-throttled-accounts-wait-for-the-next-poll.md
         if (status == 429 || status == 503 || status == 504) {
             return new ThrottledException(status, e);
         }

@@ -26,9 +26,8 @@ public final class HealthServer implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(HealthServer.class);
     private static final ObjectMapper JSON = JsonMapper.builder().build();
 
-    // Seconds a client may take to send its request or read the reply. The JDK reads both once, when
-    // it creates its first server, and without them a stalled client holds its connection forever.
-    // docs/adr/0024-a-virtual-thread-per-health-request-and-jdk-time-limits.md
+    // Without these limits a stalled client holds its connection forever, see docs/adr/0024-a-virtual-thread-per-health-request-and-jdk-time-limits.md
+    // Seconds a client may take to send its request or read the reply; the JDK reads both once, when it creates its first server.
     static final int CLIENT_TIMEOUT_SECONDS = 10;
 
     static {
@@ -55,10 +54,8 @@ public final class HealthServer implements AutoCloseable {
         } catch (IOException e) {
             throw new UncheckedIOException("cannot listen on " + address + " for /health", e);
         }
-        // Without an executor the server reads every request on its one dispatcher thread, so a
-        // client that stops mid-request blocks all others. Virtual threads are daemon threads, and
-        // unlike a fixed pool a few slow clients cannot use them all up.
-        // docs/adr/0024-a-virtual-thread-per-health-request-and-jdk-time-limits.md
+        // Without an executor one client that stops mid-request blocks all others on the single dispatcher thread, see docs/adr/0024-a-virtual-thread-per-health-request-and-jdk-time-limits.md
+        // Virtual threads are daemon threads, and unlike a fixed pool a few slow clients cannot use them all up.
         executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("health-", 0).factory());
         server.setExecutor(executor);
         server.createContext("/health", exchange -> {

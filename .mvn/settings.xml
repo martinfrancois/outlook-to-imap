@@ -1,12 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Global settings for this build, loaded by .mvn/maven.config. Every dependency and plugin comes
-     from Maven Central, but the Graph SDK and Flyway POMs declare further repositories that refuse
-     anonymous requests, so this mirror sends every remote repository to Central instead.
-     Costs: a dependency published only outside Central won't resolve until it gets its own
-     repository and mirror exclusion here; and with a system mvn instead of ./mvnw, this file
-     replaces that installation's conf/settings.xml, so proxies or mirrors set there don't apply
-     (put them in ~/.m2/settings.xml, which still applies on top).
-     See docs/adr/0019-resolve-every-dependency-from-maven-central.md. -->
+<!-- Without this mirror every build asks the Graph SDK's and Flyway's own repositories, which refuse anonymous requests, and logs a warning, see docs/adr/0019-resolve-every-dependency-from-maven-central.md
+     Loaded as global settings, so a system mvn (not ./mvnw) skips its own conf/settings.xml; ~/.m2/settings.xml still applies. -->
 <settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
     <mirrors>
         <mirror>
