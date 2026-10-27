@@ -8,9 +8,8 @@ on:
 permissions:
   contents: read
 
-# A later run waits instead of cancelling a release in progress. A queued run that a newer one
-# replaces loses nothing: release-please releases every merged release pull request still labeled
-# "autorelease: pending".
+# Without this group two quick pushes to main run release-please side by side and approve runs against the same head, see docs/adr/0025-the-release-workflow-approves-its-own-pull-request-runs.md
+# A queued run that a newer one replaces loses nothing: release-please releases every merged release pull request still labeled "autorelease: pending".
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -65,7 +64,8 @@ jobs:
           ./mvnw -B verify
           mkdir dist
           cp target/outlook-to-imap.jar "dist/outlook-to-imap-${VERSION}.jar"
-          # SHA3-256 is the project's hash where it picks one; docs/adr/0021-release-integrity-with-sha3-and-attestations.md
+          # Without this file the README's checksum check has nothing to compare the jar against, see docs/adr/0021-release-integrity-with-sha3-and-attestations.md
+          # SHA3-256, because it is the project's hash wherever it picks one.
           (cd dist && openssl dgst -sha3-256 -r "outlook-to-imap-${VERSION}.jar" > "outlook-to-imap-${VERSION}.jar.sha3-256")
           test "$(unzip -p "dist/outlook-to-imap-${VERSION}.jar" META-INF/MANIFEST.MF | tr -d '\r' | sed -n 's/^Implementation-Version: //p')" = "$VERSION"
 
@@ -143,7 +143,7 @@ jobs:
           TAG: ${{ steps.release.outputs.tag_name }}
         run: gh release edit "$TAG" --draft=false --latest
 
-  # Without this job each release pull request update waits for a manual approval; docs/adr/0025-the-release-workflow-approves-its-own-pull-request-runs.md
+  # Without this job each release pull request update waits for a manual approval, see docs/adr/0025-the-release-workflow-approves-its-own-pull-request-runs.md
   # A job of its own after the release job, so its failure never stops a release.
   approve-release-pr-runs:
     name: Approve the release pull request's runs

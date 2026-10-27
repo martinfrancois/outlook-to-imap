@@ -29,9 +29,8 @@ import org.slf4j.LoggerFactory;
 public final class PollService {
 
     private static final Logger LOG = LoggerFactory.getLogger(PollService.class);
-    // Held only during a poll and renewed on a timer meanwhile, so it runs out only when the holder
-    // died. A hung poll keeps it; /health reports that case, because only messages count as
-    // progress there.
+    // A longer lease blocks polling longer after a crash, a shorter one survives fewer missed renewals, see docs/adr/0015-one-poll-at-a-time.md
+    // Renewed during the poll, it runs out only when the holder died; a hung poll keeps it, and /health reports that.
     private static final Duration LEASE = Duration.ofMinutes(15);
     private static final Duration LEASE_RENEWAL = LEASE.dividedBy(5);
     // How long past two intervals /health waits for progress, to cover one slow message.
@@ -122,6 +121,7 @@ public final class PollService {
         } finally {
             renewals.shutdownNow();
             awaitRenewals(renewals);
+            // Without the release another process sharing the database could not poll until the lease expires, see docs/adr/0015-one-poll-at-a-time.md
             store.releaseLease(holder);
         }
     }
@@ -146,14 +146,14 @@ public final class PollService {
         try {
             Optional<PollReport> report = pollOnce(false, line -> {});
             if (report.isEmpty()) {
+                // A whole interval here would keep polling stopped long after a crashed process's lease ran out, see docs/adr/0015-one-poll-at-a-time.md
                 next = leaseRenewal;
             } else {
                 LOG.info("poll finished\n{}", report.get().summary());
             }
         } catch (Throwable e) {
-            // Without the next schedule the process stays up and never polls again. An
-            // OutOfMemoryError from one oversized message leaves a usable heap once the stack unwinds.
-            // docs/adr/0023-a-poll-that-dies-of-an-error-keeps-the-service-polling.md
+            // Without the next schedule the process stays up and never polls again, see docs/adr/0023-a-poll-that-dies-of-an-error-keeps-the-service-polling.md
+            // An OutOfMemoryError from one oversized message leaves a usable heap once the stack unwinds.
             LOG.error("poll failed", e);
         }
         if (!stopping.get()) {
@@ -183,10 +183,8 @@ public final class PollService {
             if (executor != null) {
                 executor.shutdownNow();
             }
-            // No release here: the poll may still be inside an upload, and another process that
-            // took the lease now would find no copy yet and upload the same message again. The
-            // lease runs out LEASE after its last renewal; the poll releases it if it ends first.
-            // docs/adr/0022-keep-the-poll-lease-when-a-stop-outlasts-its-grace.md
+            // Releasing here would let another process upload the message this poll may still be uploading, see docs/adr/0022-keep-the-poll-lease-when-a-stop-outlasts-its-grace.md
+            // The lease runs out LEASE after its last renewal; the poll releases it if it ends first.
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -195,8 +193,9 @@ public final class PollService {
     /**
      * Healthy while polls make progress: a poll finished, or a message was handled, less than two
      * intervals plus a margin ago. A long first poll through a big backlog stays healthy because
-     * every message counts. Account failures do not count here; they go to the heartbeat, because
-     * restarting the container would not fix them.
+     * every message counts. Account failures do not count here: they would make the container
+     * restart, which never fixes a login, so they go to the heartbeat, see
+     * docs/adr/0016-monitoring-and-failure-isolation.md.
      */
     public boolean healthy() {
         if (stopping.get() || executor == null || executor.isShutdown()) {

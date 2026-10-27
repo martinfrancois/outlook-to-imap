@@ -72,6 +72,7 @@ public final class MicrosoftLogin implements AccessTokens {
             throw new MicrosoftLoginException("device code login for account " + account.name() + " failed: "
                     + e.getCause().getMessage(), e.getCause());
         }
+        // Without this check an account configured for one address could silently copy another address's mail, see docs/adr/0008-device-code-sign-in-with-a-private-token-file-per-account.md
         String signedIn = result.account().username();
         if (signedIn == null || !signedIn.equalsIgnoreCase(account.email())) {
             String refused = "signed in as " + signedIn + " but account " + account.name() + " is configured for " + account.email();

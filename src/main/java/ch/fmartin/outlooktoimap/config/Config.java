@@ -23,11 +23,12 @@ public record Config(
 
     public static final Duration DEFAULT_POLL_INTERVAL = Duration.ofHours(1);
     public static final Duration MIN_POLL_INTERVAL = Duration.ofMinutes(1);
-    // Every poll swaps the refresh token for a new one valid for 90 days, so any interval
-    // below that keeps the login alive. 30 days leaves room for failed polls in between.
+    // A longer interval could let the 90-day refresh token run out between polls, see docs/adr/0008-device-code-sign-in-with-a-private-token-file-per-account.md
+    // Every poll swaps the refresh token for a new one; 30 days leaves room for failed polls in between.
     public static final Duration MAX_POLL_INTERVAL = Duration.ofDays(30);
 
     public record Microsoft(String clientId, String tenant) {
+        // Personal accounts are the tested case; another default would make untested work and school sign-in the usual path, see docs/adr/0009-work-and-school-accounts-best-effort.md
         public static final String DEFAULT_TENANT = "consumers";
     }
 
@@ -42,8 +43,7 @@ public record Config(
 
     public record Monitoring(int healthPort, String healthBindAddress, String heartbeatUrl) {
         public static final int DEFAULT_HEALTH_PORT = 8080;
-        // /health has no authentication, so only the host itself reaches it unless the owner opens it.
-        // docs/adr/0020-verified-postgresql-tls-and-loopback-health-by-default.md
+        // A wider default would show every account's status to anyone who reaches the port, since /health has no authentication, see docs/adr/0020-verified-postgresql-tls-and-loopback-health-by-default.md
         public static final String DEFAULT_HEALTH_BIND_ADDRESS = "127.0.0.1";
 
         /** The address /health listens on, with a host name looked up. */
@@ -57,6 +57,7 @@ public record Config(
         }
     }
 
+    // A plain-text value would send the destination's password unencrypted, see docs/adr/0017-imap-destinations-with-a-password-over-tls.md
     public enum Security {
         /** TLS from the first byte, normally port 993. */
         TLS,
@@ -74,6 +75,7 @@ public record Config(
             return folders.stream().anyMatch(FolderMapping::removeSourceAfterSync);
         }
 
+        // Always asking for Mail.ReadWrite would let anyone holding the token file change mail that is only copied, see docs/adr/0008-device-code-sign-in-with-a-private-token-file-per-account.md
         public Set<String> graphScopes() {
             return removesSource()
                     ? Set.of("https://graph.microsoft.com/Mail.ReadWrite")

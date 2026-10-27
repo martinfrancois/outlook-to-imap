@@ -53,6 +53,7 @@ public final class ImapDestination implements DestinationConnection {
     /** {@code overrides} lets tests trust a local server's self-signed certificate. */
     public static ImapDestination connect(Destination destination, Properties overrides) {
         Properties properties = new Properties();
+        // Angus Mail's default today; should that default change, a certificate for another host would get the password, see docs/adr/0017-imap-destinations-with-a-password-over-tls.md
         properties.put("mail.imap.ssl.checkserveridentity", "true");
         properties.put("mail.imap.connectiontimeout", "30000");
         properties.put("mail.imap.timeout", TIMEOUT_MILLIS);
@@ -61,6 +62,7 @@ public final class ImapDestination implements DestinationConnection {
             properties.put("mail.imap.ssl.enable", "true");
         } else {
             properties.put("mail.imap.starttls.enable", "true");
+            // Without it a server that offers no STARTTLS would receive the password in plain text, see docs/adr/0017-imap-destinations-with-a-password-over-tls.md
             properties.put("mail.imap.starttls.required", "true");
         }
         properties.putAll(overrides);
@@ -100,6 +102,7 @@ public final class ImapDestination implements DestinationConnection {
                     continue;
                 }
                 int number = candidate.getMessageNumber();
+                // Hashing anything but the full stored bytes would miss the copy and upload it again; BODY.PEEK leaves it unread, see docs/adr/0014-verify-each-upload-and-settle-unknown-ones-by-content.md
                 byte[] stored = (byte[]) folder.doCommand(protocol -> {
                     BODY body = protocol.peekBody(number, "");
                     return body == null ? null : body.getByteArrayInputStream().readAllBytes();
@@ -166,6 +169,7 @@ public final class ImapDestination implements DestinationConnection {
         IMAPFolder folder = (IMAPFolder) store.getFolder(path.replace('/', separator));
         if (!folder.exists()) {
             if (!create) {
+                // Creating a folder while looking for a copy would change the destination just to settle an upload, see docs/adr/0014-verify-each-upload-and-settle-unknown-ones-by-content.md
                 return null;
             }
             if (!folder.create(Folder.HOLDS_MESSAGES)) {
@@ -185,7 +189,8 @@ public final class ImapDestination implements DestinationConnection {
 
     /**
      * A message that writes the downloaded bytes as they are. Parsing and re-serialising them with
-     * MimeMessage could reorder or re-encode parts.
+     * MimeMessage could reorder or re-encode parts, and the copy would no longer match the hash its
+     * receipt recorded, see docs/adr/0014-verify-each-upload-and-settle-unknown-ones-by-content.md.
      */
     private static final class RawMessage extends MimeMessage {
         private final byte[] mime;

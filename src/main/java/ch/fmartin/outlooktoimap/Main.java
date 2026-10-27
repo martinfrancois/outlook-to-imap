@@ -41,6 +41,7 @@ public final class Main {
     /** Exit code when another process held the poll lease. */
     static final int EXIT_BUSY = 3;
 
+    // At or above the container's 30 second stop timeout, the runtime kills the JVM before this wait ends, see docs/adr/0015-one-poll-at-a-time.md
     private static final Duration SHUTDOWN_GRACE = Duration.ofSeconds(25);
 
     @Spec

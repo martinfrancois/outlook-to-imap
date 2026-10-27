@@ -105,6 +105,7 @@ public final class ConfigLoader {
                 return new Database(defaultUrl, null, null);
             }
             String url = raw.url() == null ? defaultUrl : raw.url();
+            // Any other engine would run SQL that no test has run on it, see docs/adr/0003-one-database-layer-for-sqlite-and-postgresql.md
             if (!url.startsWith(Database.SQLITE_PREFIX) && !url.startsWith(Database.POSTGRESQL_PREFIX)) {
                 errors.add("database.url must start with " + Database.SQLITE_PREFIX + " or " + Database.POSTGRESQL_PREFIX + ", got " + url);
             }
@@ -197,6 +198,7 @@ public final class ConfigLoader {
                     errors.add(where + ".email must be the Microsoft account's email address");
                 }
                 String clientId = a.clientId() != null ? a.clientId() : microsoft.clientId();
+                // A built-in client ID would put every user's accounts on one app that anyone's misuse can get blocked, see docs/adr/0001-each-user-registers-their-own-app.md
                 if (clientId == null) {
                     errors.add(where + " has no clientId: set microsoft.clientId or the account's clientId");
                 }

@@ -30,7 +30,8 @@ import org.sqlite.SQLiteConfig;
 /**
  * Receipts, checkpoints and per-account status in SQLite or PostgreSQL. Flyway creates and
  * upgrades the schema; every statement here is SQL both engines accept, so neither has code of
- * its own.
+ * its own. A statement or path that only one engine runs would let the two engines drift apart, see
+ * docs/adr/0003-one-database-layer-for-sqlite-and-postgresql.md.
  */
 public final class Store implements AutoCloseable {
 
@@ -89,15 +90,13 @@ public final class Store implements AutoCloseable {
         Optional<Path> newSqliteFile;
         if (database.isSqlite()) {
             newSqliteFile = prepareSqliteFile(database.url());
-            // SQLite locks the whole file per write; waiting beats failing when the health
-            // endpoint reads while a poll writes.
+            // Without it a /health read fails while a poll writes, since SQLite locks the whole file per write, see docs/adr/0003-one-database-layer-for-sqlite-and-postgresql.md
             hikari.addDataSourceProperty("busy_timeout", "30000");
             hikari.setMaximumPoolSize(2);
         } else {
             newSqliteFile = Optional.empty();
             hikari.setMaximumPoolSize(4);
-            // Without it the driver falls back to plain text and never checks the certificate.
-            // docs/adr/0020-verified-postgresql-tls-and-loopback-health-by-default.md
+            // Without it the driver falls back to plain text and never checks the certificate, see docs/adr/0020-verified-postgresql-tls-and-loopback-health-by-default.md
             if (!choosesTls(database.url())) {
                 hikari.addDataSourceProperty(PGProperty.SSL_MODE.getName(), "verify-full");
             }
@@ -191,6 +190,7 @@ public final class Store implements AutoCloseable {
         }
     }
 
+    // The key is account and immutable message id; adding the folder would copy a message moved between folders twice, see docs/adr/0004-one-copy-per-account-and-removal-trusts-the-receipt.md
     public Optional<Receipt> receipt(String account, String messageId) {
         return jdbi.withHandle(h -> h.createQuery("SELECT * FROM receipt WHERE account = :account AND message_id = :id")
                 .bind("account", account)

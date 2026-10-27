@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
-  # Lets a maintainer run CI on any branch by hand.
+  # Kept for maintainers who start CI on a branch by hand; nothing in the repository dispatches CI, see docs/adr/0025-the-release-workflow-approves-its-own-pull-request-runs.md
   workflow_dispatch:
 
 permissions:
@@ -15,11 +15,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # The Java versions to test come from endoflife.date, so a new LTS joins the matrix on the day
-  # it ships without a change here. Only LTS releases from the lowest committed version upward
-  # count, which must be maven.compiler.release in pom.xml and the minimum the README promises.
-  # The site's answer is added to the committed list, so a wrong or tampered reply can add
-  # versions but never drop one.
+  # Without this job a new Java LTS goes untested until someone edits the matrix, see docs/adr/0011-java-21-minimum-and-every-lts-tested.md
+  # The committed list must start at maven.compiler.release; endoflife.date's reply can add versions but never drop one.
   lts:
     name: lts
     runs-on: ubuntu-latest
@@ -93,9 +90,8 @@ jobs:
       - name: Build the image and run it
         run: scripts/smoke-image.sh docker outlook-to-imap:ci
 
-  # The ruleset on main requires a status check named exactly "build". The matrix legs are named
-  # "test (Java 21)" and so on and change with every new LTS, so this job carries their result,
-  # and the image check's, into one stable name.
+  # Without this job the status check "build" that the ruleset on main requires never reports, see docs/adr/0012-releases-with-release-please-after-a-live-check.md
+  # The matrix legs are named "test (Java 21)" and so on and change with every new LTS; this job carries their result, and the image check's.
   build:
     name: build
     runs-on: ubuntu-latest

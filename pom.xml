@@ -10,7 +10,8 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <!-- The minimum Java version for the jar. CI tests every LTS from this one upward. -->
+        <!-- Raising it shuts out everyone who runs the jar on an older Java, see docs/adr/0011-java-21-minimum-and-every-lts-tested.md
+             The lowest entry of the committed list in ci.yml's lts job must change with it, or that matrix leg fails. -->
         <maven.compiler.release>21</maven.compiler.release>
         <main.class>ch.fmartin.outlooktoimap.Main</main.class>
         <flyway.version>13.10.3</flyway.version>
@@ -26,8 +27,8 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- The Graph SDK's azure-core and JWT libraries need Jackson 2 at runtime. Without this,
-                 Maven takes whichever version a test library or azure-core asks for, vulnerable or not. -->
+            <!-- Without this import Maven takes whichever Jackson 2 a test library or azure-core asks for, vulnerable or not, see docs/adr/0013-dependency-updates-and-transitive-pins.md
+                 The Graph SDK's azure-core and JWT libraries need Jackson 2 at runtime. -->
             <dependency>
                 <groupId>com.fasterxml.jackson</groupId>
                 <artifactId>jackson-bom</artifactId>
@@ -35,7 +36,7 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <!-- Kiota pulls in OpenTelemetry; this keeps it at a version without known vulnerabilities. -->
+            <!-- Without this import Kiota's OpenTelemetry stays at whatever version it asks for, known vulnerabilities included, see docs/adr/0013-dependency-updates-and-transitive-pins.md -->
             <dependency>
                 <groupId>io.opentelemetry</groupId>
                 <artifactId>opentelemetry-bom</artifactId>
@@ -53,8 +54,8 @@
             <artifactId>msal4j</artifactId>
             <version>1.26.0</version>
         </dependency>
-        <!-- Graph requests: delta paging, MIME download, move, and the retry handler that
-             honours Retry-After. -->
+        <!-- Replacing it with plain HTTP calls means maintaining delta paging, retries and error parsing here, see docs/adr/0005-graph-sdk-despite-its-size.md
+             Graph requests: delta paging, MIME download, move, and the retry handler that honours Retry-After. -->
         <dependency>
             <groupId>com.microsoft.graph</groupId>
             <artifactId>microsoft-graph</artifactId>
@@ -77,7 +78,7 @@
             <version>3.2.4</version>
         </dependency>
         <!-- Receipts and checkpoints. Jdbi and Flyway keep the SQL portable between the two
-             supported engines, see docs/adr/0003. -->
+             supported engines. -->
         <dependency>
             <groupId>org.jdbi</groupId>
             <artifactId>jdbi3-core</artifactId>
