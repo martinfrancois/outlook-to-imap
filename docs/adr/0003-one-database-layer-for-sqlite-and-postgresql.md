@@ -72,7 +72,7 @@ The rules:
 
 ### Confirmation
 
-The 5 tests of `StoreTest` and `PollerTest.copiesTheBacklogOnceAndNeverAgainEvenAfterTheCopiesAreDeleted`
+The tests of `StoreTest` and `PollerTest.copiesTheBacklogOnceAndNeverAgainEvenAfterTheCopiesAreDeleted`
 run on SQLite and on PostgreSQL through Testcontainers (`postgres:18-alpine`); `./mvnw -B verify`
 runs them in CI. `ConfigLoaderTest.rejectsAnotherDatabaseEngine` checks that other URLs are
 rejected. The first line of `V1__receipts_checkpoints_status.sql` says the SQL must stay plain, and
