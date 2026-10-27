@@ -216,7 +216,7 @@ public final class PollService {
     private void awaitRenewals(ScheduledExecutorService renewals) {
         try {
             if (!renewals.awaitTermination(leaseRenewal.toMillis(), TimeUnit.MILLISECONDS)) {
-                LOG.warn("a poll lease renewal is still running; the lease may stay taken until it expires");
+                LOG.warn("a poll lease renewal is still running; a \"no longer holds the poll lease\" error after this is harmless");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
