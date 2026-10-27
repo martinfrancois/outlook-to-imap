@@ -15,7 +15,11 @@ import ch.fmartin.outlooktoimap.store.Store.State;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.Statement;
 import java.time.Instant;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -143,13 +147,40 @@ class StoreTest {
     @MethodSource("engines")
     void checkpointsArePerAccountAndFolder(Engine engine) {
         try (Store store = Store.open(Databases.fresh(engine, directory))) {
-            store.saveCheckpoint("hotmail", "junkemail", "link-1", false, T0);
-            store.saveCheckpoint("hotmail", "junkemail", "link-2", true, T0);
-            store.saveCheckpoint("hotmail", "archive", null, false, T0);
+            store.saveCheckpoint("hotmail", "junkemail", new Checkpoint("junkemail", "link-1", false), T0);
+            store.saveCheckpoint("hotmail", "junkemail", new Checkpoint("junkemail", "link-2", true), T0);
+            store.saveCheckpoint("hotmail", "archive", new Checkpoint("f-archive", null, false), T0);
 
-            assertThat(store.checkpoint("hotmail", "junkemail")).contains(new Checkpoint("link-2", true));
-            assertThat(store.checkpoint("hotmail", "archive")).contains(new Checkpoint(null, false));
+            assertThat(store.checkpoint("hotmail", "junkemail")).contains(new Checkpoint("junkemail", "link-2", true));
+            assertThat(store.checkpoint("hotmail", "archive")).contains(new Checkpoint("f-archive", null, false));
             assertThat(store.checkpoint("live", "junkemail")).isEmpty();
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("engines")
+    void aCheckpointSavedBeforeFolderIdsReadsNoKnownFolderUntilItsNextSave(Engine engine) throws Exception {
+        Database database = Databases.fresh(engine, directory);
+        // The SQLite driver creates the file but not its directory, which Store.open would create.
+        Files.createDirectories(directory.resolve("state"));
+        String password = database.passwordFile() == null ? null : Files.readString(database.passwordFile()).strip();
+        Flyway.configure().dataSource(database.url(), database.username(), password)
+                .locations("classpath:db/migration").target("1").load().migrate();
+        try (Connection connection = DriverManager.getConnection(database.url(), database.username(), password);
+                Statement statement = connection.createStatement()) {
+            statement.execute("INSERT INTO checkpoint (account, source_folder, delta_link, removal_enabled, updated_at)"
+                    + " VALUES ('hotmail', 'Projects', 'link-1', FALSE, 0)");
+        }
+
+        try (Store store = Store.open(database)) {
+            Checkpoint upgraded = store.checkpoint("hotmail", "Projects").get();
+            assertThat(upgraded).isEqualTo(new Checkpoint(null, "link-1", false));
+            assertThat(upgraded.readsFolder("f-projects")).isFalse();
+
+            store.saveCheckpoint("hotmail", "Projects", new Checkpoint("f-projects", "link-2", false), T0);
+            Checkpoint saved = store.checkpoint("hotmail", "Projects").get();
+            assertThat(saved.readsFolder("f-projects")).isTrue();
+            assertThat(saved.readsFolder("f-new")).isFalse();
         }
     }
 

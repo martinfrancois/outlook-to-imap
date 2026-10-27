@@ -53,7 +53,14 @@ public final class Store implements AutoCloseable {
             Instant removedAt,
             String lastError) {}
 
-    public record Checkpoint(String deltaLink, boolean removalEnabled) {}
+    /** {@code folderId} is null for a checkpoint saved before migration V2 added the column. */
+    public record Checkpoint(String folderId, String deltaLink, boolean removalEnabled) {
+
+        /** Whether the saved delta link is known to read the folder with id {@code currentFolderId}. */
+        public boolean readsFolder(String currentFolderId) {
+            return currentFolderId.equals(folderId);
+        }
+    }
 
     public record AccountStatus(
             String account,
@@ -250,24 +257,26 @@ public final class Store implements AutoCloseable {
 
     public Optional<Checkpoint> checkpoint(String account, String sourceFolder) {
         return jdbi.withHandle(h -> h.createQuery(
-                        "SELECT delta_link, removal_enabled FROM checkpoint WHERE account = :account AND source_folder = :source")
+                        "SELECT folder_id, delta_link, removal_enabled FROM checkpoint WHERE account = :account AND source_folder = :source")
                 .bind("account", account)
                 .bind("source", sourceFolder)
-                .map((rs, ctx) -> new Checkpoint(rs.getString("delta_link"), rs.getBoolean("removal_enabled")))
+                .map((rs, ctx) -> new Checkpoint(rs.getString("folder_id"), rs.getString("delta_link"),
+                        rs.getBoolean("removal_enabled")))
                 .findOne());
     }
 
-    public void saveCheckpoint(String account, String sourceFolder, String deltaLink, boolean removalEnabled, Instant at) {
+    public void saveCheckpoint(String account, String sourceFolder, Checkpoint checkpoint, Instant at) {
         jdbi.useHandle(h -> h.createUpdate("""
-                        INSERT INTO checkpoint (account, source_folder, delta_link, removal_enabled, updated_at)
-                        VALUES (:account, :source, :link, :removal, :at)
+                        INSERT INTO checkpoint (account, source_folder, folder_id, delta_link, removal_enabled, updated_at)
+                        VALUES (:account, :source, :folder, :link, :removal, :at)
                         ON CONFLICT (account, source_folder) DO UPDATE SET
-                            delta_link = :link, removal_enabled = :removal, updated_at = :at
+                            folder_id = :folder, delta_link = :link, removal_enabled = :removal, updated_at = :at
                         """)
                 .bind("account", account)
                 .bind("source", sourceFolder)
-                .bind("link", deltaLink)
-                .bind("removal", removalEnabled)
+                .bind("folder", checkpoint.folderId())
+                .bind("link", checkpoint.deltaLink())
+                .bind("removal", checkpoint.removalEnabled())
                 .bind("at", at.toEpochMilli())
                 .execute());
     }
