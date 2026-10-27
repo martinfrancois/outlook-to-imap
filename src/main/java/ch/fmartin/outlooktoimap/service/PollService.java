@@ -209,7 +209,10 @@ public final class PollService {
         return lastFinished.get();
     }
 
-    /** A renewal that is still running could otherwise take the lease back after the release. */
+    /**
+     * A renewal that ran after the release would find the lease gone and log a false "no longer
+     * holds the poll lease" error, or reach a database that {@code once} has already closed.
+     */
     private void awaitRenewals(ScheduledExecutorService renewals) {
         try {
             if (!renewals.awaitTermination(leaseRenewal.toMillis(), TimeUnit.MILLISECONDS)) {
