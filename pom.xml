@@ -14,7 +14,7 @@
              The lowest entry of the committed list in ci.yml's lts job must change with it, or that matrix leg fails. -->
         <maven.compiler.release>21</maven.compiler.release>
         <main.class>ch.fmartin.outlooktoimap.Main</main.class>
-        <flyway.version>13.10.3</flyway.version>
+        <flyway.version>13.11.0</flyway.version>
         <testcontainers.version>2.0.5</testcontainers.version>
     </properties>
 
