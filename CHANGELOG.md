@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/martinfrancois/outlook-to-imap/compare/v2.0.0...v2.0.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **deps:** update dependency com.microsoft.graph:microsoft-graph to v6.72.0 ([#40](https://github.com/martinfrancois/outlook-to-imap/issues/40)) ([2519c4d](https://github.com/martinfrancois/outlook-to-imap/commit/2519c4db531ba30ec2f1ccb907ce0e8662e14ac0))
+
 ## [2.0.0](https://github.com/martinfrancois/outlook-to-imap/compare/v1.0.0...v2.0.0) (2026-10-28)
 
 
