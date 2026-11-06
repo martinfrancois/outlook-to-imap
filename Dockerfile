@@ -1,5 +1,5 @@
 # Builds the same shaded jar as `./mvnw package` and runs it on a Java 25 runtime.
-FROM docker.io/library/eclipse-temurin:25-jdk@sha256:2d5d5e9b533342a565907c84f47a2ec298c40cde7b13a3ca85d4950fa456a641 AS build
+FROM docker.io/library/eclipse-temurin:25-jdk@sha256:83f4a7fc27df94dcc7b8de04d14cbbba8da14406f921e966969c3b09000aa507 AS build
 WORKDIR /src
 # Without unzip the wrapper downloads Maven's .tar.gz instead of the .zip whose SHA-256 it checks, and stops, see docs/adr/0021-release-integrity-with-sha3-and-attestations.md
 RUN apt-get update \
