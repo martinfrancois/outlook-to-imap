@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.1](https://github.com/martinfrancois/outlook-to-imap/compare/v2.0.0...v2.0.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **deps:** update dependency ch.qos.logback:logback-classic to v1.6.6 ([#44](https://github.com/martinfrancois/outlook-to-imap/issues/44)) ([84483e0](https://github.com/martinfrancois/outlook-to-imap/commit/84483e0e3bc7e8bf74525f254e590a2021eb7d5d))
+* **deps:** update dependency com.microsoft.graph:microsoft-graph to v6.72.0 ([#40](https://github.com/martinfrancois/outlook-to-imap/issues/40)) ([2519c4d](https://github.com/martinfrancois/outlook-to-imap/commit/2519c4db531ba30ec2f1ccb907ce0e8662e14ac0))
+* **deps:** update dependency io.opentelemetry:opentelemetry-bom to v1.68.0 ([#53](https://github.com/martinfrancois/outlook-to-imap/issues/53)) ([e0d4ff0](https://github.com/martinfrancois/outlook-to-imap/commit/e0d4ff07c0a43ade72f2f461ec7ef55986a3df0d))
+* **deps:** update dependency org.xerial:sqlite-jdbc to v3.54.1.0 ([#46](https://github.com/martinfrancois/outlook-to-imap/issues/46)) ([6357d9b](https://github.com/martinfrancois/outlook-to-imap/commit/6357d9bfe95bfccd6ae80000657f18b6959222d6))
+* **deps:** update flyway to v13.12.0 ([#49](https://github.com/martinfrancois/outlook-to-imap/issues/49)) ([118bd67](https://github.com/martinfrancois/outlook-to-imap/commit/118bd67bcfd72caf37a6e501e4fa9ce83ed2fc7a))
+* **deps:** update flyway to v13.12.1 ([#51](https://github.com/martinfrancois/outlook-to-imap/issues/51)) ([d862d12](https://github.com/martinfrancois/outlook-to-imap/commit/d862d127d7719be48142b1f64af63469a7036fec))
+
 ## [2.0.0](https://github.com/martinfrancois/outlook-to-imap/compare/v1.0.0...v2.0.0) (2026-10-28)
 
 
