@@ -52,7 +52,7 @@
         <dependency>
             <groupId>com.microsoft.azure</groupId>
             <artifactId>msal4j</artifactId>
-            <version>1.26.0</version>
+            <version>1.26.1</version>
         </dependency>
         <!-- Replacing it with plain HTTP calls means maintaining delta paging, retries and error parsing here, see docs/adr/0005-graph-sdk-despite-its-size.md
              Graph requests: delta paging, MIME download, move, and the retry handler that honours Retry-After. -->
