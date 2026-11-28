@@ -13,7 +13,7 @@ COPY src ./src
 # CI runs the tests; the image build only packages.
 RUN ./mvnw -B -q package -DskipTests -Djacoco.skip=true
 
-FROM docker.io/library/eclipse-temurin:25-jre@sha256:ecdc0adb37bde1a281c4d245a3cd535004b1fc8322d560f5b09463b248c81df0
+FROM docker.io/library/eclipse-temurin:25-jre@sha256:4ed132f6832e9804b123e89a849a7b4502756ae64a4ee08ebab939d9d5d0a9fa
 # curl runs the health check below.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
